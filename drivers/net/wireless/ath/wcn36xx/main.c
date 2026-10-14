@@ -209,6 +209,11 @@ static int wcn36xx_start(struct ieee80211_hw *hw)
 	struct wcn36xx *wcn = hw->priv;
 	int ret;
 
+	if (wcn->is_started) {
+		wcn36xx_dbg(WCN36XX_DBG_MAC, "chip already started, skipping\n");
+		return 0;
+	}
+
 	wcn36xx_dbg(WCN36XX_DBG_MAC, "mac start\n");
 
 	/* SMD initialization */
@@ -231,12 +236,7 @@ static int wcn36xx_start(struct ieee80211_hw *hw)
 		goto out_free_dxe_pool;
 	}
 
-	ret = wcn36xx_smd_load_nv(wcn);
-	if (ret) {
-		wcn36xx_err("Failed to push NV to chip\n");
-		goto out_free_dxe_ctl;
-	}
-
+	/* NV is already downloaded by qcom_wcnss_ctrl */
 	ret = wcn36xx_smd_start(wcn);
 	if (ret) {
 		wcn36xx_err("Failed to start chip\n");
@@ -264,6 +264,7 @@ static int wcn36xx_start(struct ieee80211_hw *hw)
 	spin_lock_init(&wcn->dxe_lock);
 	spin_lock_init(&wcn->survey_lock);
 
+	wcn->is_started = true;
 	return 0;
 
 out_smd_stop:
@@ -302,6 +303,7 @@ static void wcn36xx_stop(struct ieee80211_hw *hw, bool suspend)
 
 	wcn36xx_dxe_free_mem_pools(wcn);
 	wcn36xx_dxe_free_ctl_blks(wcn);
+	wcn->is_started = false;
 }
 
 static void wcn36xx_change_ps(struct wcn36xx *wcn, bool enable)
@@ -414,10 +416,7 @@ static int wcn36xx_config(struct ieee80211_hw *hw, int radio_idx, u32 changed)
 		wcn36xx_change_ps(wcn, hw->conf.flags & IEEE80211_CONF_PS);
 
 	if (changed & IEEE80211_CONF_CHANGE_IDLE) {
-		if (hw->conf.flags & IEEE80211_CONF_IDLE)
-			wcn36xx_smd_enter_imps(wcn);
-		else
-			wcn36xx_smd_exit_imps(wcn);
+		/* Do not enter IMPS on Pronto v3 to prevent halPMU A2XB haltACK crash */
 	}
 
 	mutex_unlock(&wcn->conf_mutex);

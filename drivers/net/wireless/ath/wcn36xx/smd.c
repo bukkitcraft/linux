@@ -674,23 +674,13 @@ int wcn36xx_smd_stop(struct wcn36xx *wcn)
 	mutex_lock(&wcn->hal_mutex);
 	INIT_HAL_MSG(msg_body, WCN36XX_HAL_STOP_REQ);
 
-	msg_body.stop_req_params.reason = HAL_STOP_TYPE_RF_KILL;
+	msg_body.stop_req_params.reason = HAL_STOP_TYPE_SYS_DEEP_SLEEP;
 
 	PREPARE_HAL_BUF(wcn->hal_buf, msg_body);
 
-	ret = wcn36xx_smd_send_and_wait(wcn, msg_body.header.len);
-	if (ret) {
-		wcn36xx_err("Sending hal_stop failed\n");
-		goto out;
-	}
-	ret = wcn36xx_smd_rsp_status_check(wcn->hal_buf, wcn->hal_rsp_len);
-	if (ret) {
-		wcn36xx_err("hal_stop response failed err=%d\n", ret);
-		goto out;
-	}
-out:
+	ret = rpmsg_send(wcn->smd_channel, wcn->hal_buf, msg_body.header.len);
 	mutex_unlock(&wcn->hal_mutex);
-	return ret;
+	return 0;
 }
 
 int wcn36xx_smd_init_scan(struct wcn36xx *wcn, enum wcn36xx_hal_sys_mode mode,
@@ -2216,29 +2206,8 @@ out:
 
 int wcn36xx_smd_enter_imps(struct wcn36xx *wcn)
 {
-	struct wcn36xx_hal_enter_imps_req_msg msg_body;
-	int ret;
-
-	mutex_lock(&wcn->hal_mutex);
-	INIT_HAL_MSG(msg_body, WCN36XX_HAL_ENTER_IMPS_REQ);
-
-	PREPARE_HAL_BUF(wcn->hal_buf, msg_body);
-
-	ret = wcn36xx_smd_send_and_wait(wcn, msg_body.header.len);
-	if (ret) {
-		wcn36xx_err("Sending hal_enter_imps failed\n");
-		goto out;
-	}
-	ret = wcn36xx_smd_rsp_status_check(wcn->hal_buf, wcn->hal_rsp_len);
-	if (ret) {
-		wcn36xx_err("hal_enter_imps response failed err=%d\n", ret);
-		goto out;
-	}
-
-	wcn36xx_dbg(WCN36XX_DBG_HAL, "Entered idle mode\n");
-out:
-	mutex_unlock(&wcn->hal_mutex);
-	return ret;
+	/* Disabled on Pronto v3 to prevent halPMU A2XB haltACK failure */
+	return 0;
 }
 
 int wcn36xx_smd_exit_imps(struct wcn36xx *wcn)
