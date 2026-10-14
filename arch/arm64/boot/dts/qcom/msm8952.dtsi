@@ -801,8 +801,6 @@
 					"s8_p1", "s8_p2",
 					"s9_p1", "s9_p2",
 					"s10_p1", "s10_p2";
-			interrupts = <GIC_SPI 184 IRQ_TYPE_LEVEL_HIGH>;
-			interrupt-names = "uplow";
 			#thermal-sensor-cells = <1>;
 			#qcom,sensors = <11>;
 		};
