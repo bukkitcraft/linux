@@ -138,10 +138,11 @@
 	};
 
 	speaker_amp: audio-amplifier {
-		compatible = "simple-audio-amplifier";
+		compatible = "awinic,aw8738";
 		pinctrl-0 = <&speaker_amp_default>;
 		pinctrl-names = "default";
-		enable-gpios = <&tlmm 38 GPIO_ACTIVE_HIGH>;
+		mode-gpios = <&tlmm 38 GPIO_ACTIVE_HIGH>;
+		awinic,mode = <5>;
 		sound-name-prefix = "Speaker Amp";
 	};
 
@@ -392,7 +393,6 @@
 	regulator-min-microvolt = <4600000>;
 	regulator-max-microvolt = <6000000>;
 	qcom,soft-start-us = <800>;
-	regulator-over-current-protection;
 	regulator-soft-start;
 	regulator-pull-down;
 	qcom,discharge-resistor-kohms = <32>;
@@ -402,7 +402,6 @@
 	regulator-min-microvolt = <4600000>;
 	regulator-max-microvolt = <6000000>;
 	qcom,soft-start-us = <800>;
-	regulator-over-current-protection;
 	regulator-soft-start;
 	regulator-pull-down;
 };
@@ -540,7 +539,6 @@
 };
 
 &sound {
-	// TODO: Sound doesn't work
 	model = "gm-shamrock";
 
 	audio-routing =
@@ -556,8 +554,10 @@
 			"LEFTIN", "HPH_L",
 			"RIGHTIN", "HPH_R",
 			"Headphone Jack", "HPLEFT",
-			"Headphone Jack", "HPRIGHT";
-	aux-devs = <&tpa6130a2>;
+			"Headphone Jack", "HPRIGHT",
+			"Speaker Amp IN", "HPH_R",
+			"Speaker", "Speaker Amp OUT";
+	aux-devs = <&tpa6130a2>, <&speaker_amp>;
 
 	status = "okay";
 };
@@ -816,4 +816,21 @@
 
 &xo_board {
 	clock-frequency = <19200000>;
+};
+
+&wcnss_mem {
+	status = "okay";
+};
+
+&wcnss {
+	vddpx-supply = <&pm8950_l6>;
+	status = "okay";
+};
+
+&wcnss_iris {
+	compatible = "qcom,wcn3660b";
+	vddxo-supply = <&pm8950_l7>;
+	vddrfa-supply = <&pm8950_l19>;
+	vddpa-supply = <&pm8950_l17>;
+	vdddig-supply = <&pm8950_l6>;
 };
