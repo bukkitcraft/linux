@@ -257,24 +257,26 @@ static int wcnss_start(struct rproc *rproc)
 	wcnss_indicate_nv_download(wcnss);
 	wcnss_configure_iris(wcnss);
 
+	dev_info(wcnss->dev, "wcnss_start: use_48mhz_xo=%d mem_phys=%pa size=%zu\n",
+		 wcnss->use_48mhz_xo, &wcnss->mem_phys, wcnss->mem_size);
+
 	ret = qcom_scm_pas_auth_and_reset(WCNSS_PAS_ID);
 	if (ret) {
 		dev_err(wcnss->dev,
-			"failed to authenticate image and release reset\n");
+			"failed to authenticate image and release reset: %d\n", ret);
 		goto disable_iris;
 	}
 
-	ret = wait_for_completion_timeout(&wcnss->start_done,
-					  msecs_to_jiffies(5000));
-	if (wcnss->ready_irq > 0 && ret == 0) {
-		/* We have a ready_irq, but it didn't fire in time. */
-		dev_err(wcnss->dev, "start timed out\n");
-		qcom_scm_pas_shutdown(WCNSS_PAS_ID);
-		ret = -ETIMEDOUT;
-		goto disable_iris;
-	}
+	dev_info(wcnss->dev, "pas_auth_and_reset succeeded, Pronto running\n");
 
+	/*
+	 * On Pronto v3 (MSM8952), Pronto does not signal ready until
+	 * wcnss_ctrl downloads the NV binary over SMD. Returning immediately
+	 * allows the SMD subdevice (wcnss_ctrl) to communicate and complete
+	 * the cold boot sequence.
+	 */
 	ret = 0;
+	goto release_iris_lock;
 
 disable_iris:
 	qcom_iris_disable(wcnss->iris);
@@ -294,7 +296,7 @@ release_iris_lock:
 static int wcnss_stop(struct rproc *rproc)
 {
 	struct qcom_wcnss *wcnss = rproc->priv;
-	int ret;
+	int ret, i;
 
 	if (wcnss->state) {
 		qcom_smem_state_update_bits(wcnss->state,
@@ -314,6 +316,15 @@ static int wcnss_stop(struct rproc *rproc)
 	ret = qcom_scm_pas_shutdown(WCNSS_PAS_ID);
 	if (ret)
 		dev_err(wcnss->dev, "failed to shutdown: %d\n", ret);
+
+	mutex_lock(&wcnss->iris_lock);
+	qcom_iris_disable(wcnss->iris);
+	regulator_bulk_disable(wcnss->num_vregs, wcnss->vregs);
+	for (i = wcnss->num_pds - 1; i >= 0; i--) {
+		pm_runtime_put(wcnss->pds[i]);
+		dev_pm_genpd_set_performance_state(wcnss->pds[i], 0);
+	}
+	mutex_unlock(&wcnss->iris_lock);
 
 	return ret;
 }
@@ -366,6 +377,7 @@ static irqreturn_t wcnss_ready_interrupt(int irq, void *dev)
 {
 	struct qcom_wcnss *wcnss = dev;
 
+	dev_info(wcnss->dev, "READY INTERRUPT FIRED!\n");
 	complete(&wcnss->start_done);
 
 	return IRQ_HANDLED;
@@ -373,15 +385,9 @@ static irqreturn_t wcnss_ready_interrupt(int irq, void *dev)
 
 static irqreturn_t wcnss_handover_interrupt(int irq, void *dev)
 {
-	/*
-	 * XXX: At this point we're supposed to release the resources that we
-	 * have been holding on behalf of the WCNSS. Unfortunately this
-	 * interrupt comes way before the other side seems to be done.
-	 *
-	 * So we're currently relying on the ready interrupt firing later then
-	 * this and we just disable the resources at the end of wcnss_start().
-	 */
+	struct qcom_wcnss *wcnss = dev;
 
+	dev_info(wcnss->dev, "HANDOVER INTERRUPT FIRED!\n");
 	return IRQ_HANDLED;
 }
 
@@ -652,11 +658,7 @@ static int wcnss_probe(struct platform_device *pdev)
 	}
 
 	qcom_add_smd_subdev(rproc, &wcnss->smd_subdev);
-	wcnss->sysmon = qcom_add_sysmon_subdev(rproc, "wcnss", WCNSS_SSCTL_ID);
-	if (IS_ERR(wcnss->sysmon)) {
-		ret = PTR_ERR(wcnss->sysmon);
-		goto detach_pds;
-	}
+	wcnss->sysmon = NULL;
 
 	wcnss->iris = qcom_iris_probe(&pdev->dev, &wcnss->use_48mhz_xo);
 	if (IS_ERR(wcnss->iris)) {
@@ -686,7 +688,8 @@ static void wcnss_remove(struct platform_device *pdev)
 
 	rproc_del(wcnss->rproc);
 
-	qcom_remove_sysmon_subdev(wcnss->sysmon);
+	if (wcnss->sysmon)
+		qcom_remove_sysmon_subdev(wcnss->sysmon);
 	qcom_remove_smd_subdev(wcnss->rproc, &wcnss->smd_subdev);
 	wcnss_release_pds(wcnss);
 }
