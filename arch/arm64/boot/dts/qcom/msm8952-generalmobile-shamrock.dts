@@ -219,15 +219,42 @@
 &blsp1_i2c3 {
 	status = "okay";
 
-	/* himax,852x@48 Touchscreen */
+	/* Synaptics DSX Touchscreen */
+	touchscreen@20 {
+		compatible = "synaptics,dsx";
+		reg = <0x20>;
+		interrupts-extended = <&tlmm 65 IRQ_TYPE_EDGE_FALLING>;
+		reset-gpios = <&tlmm 64 GPIO_ACTIVE_LOW>;
+		avdd-supply = <&touch_avdd_vreg>;
+		vdd-supply = <&pm8950_l6>;
+		pinctrl-0 = <&touchscreen_default>;
+		pinctrl-names = "default";
+		touchscreen-size-x = <1080>;
+		touchscreen-size-y = <1920>;
+	};
 
+	/* Himax HX852x / HX83112 Touchscreen */
+	touchscreen@48 {
+		compatible = "himax,hx852x", "himax,852x";
+		reg = <0x48>;
+		interrupts-extended = <&tlmm 65 IRQ_TYPE_EDGE_FALLING>;
+		reset-gpios = <&tlmm 64 GPIO_ACTIVE_LOW>;
+		avdd-supply = <&touch_avdd_vreg>;
+		vdd-supply = <&pm8950_l6>;
+		pinctrl-0 = <&touchscreen_default>;
+		pinctrl-names = "default";
+		touchscreen-size-x = <1080>;
+		touchscreen-size-y = <1920>;
+	};
+
+	/* Goodix GT970 / GT911 Touchscreen */
 	touchscreen@5d {
 		compatible = "goodix,gt970", "goodix,gt911";
 		reg = <0x5d>;
 		interrupts-extended = <&tlmm 65 IRQ_TYPE_EDGE_FALLING>;
 		irq-gpios = <&tlmm 65 GPIO_ACTIVE_HIGH>;
 		reset-gpios = <&tlmm 64 GPIO_ACTIVE_HIGH>;
-		AVDD28-supply = <&pm8950_l10>;
+		AVDD28-supply = <&touch_avdd_vreg>;
 		VDDIO-supply = <&pm8950_l6>;
 
 		pinctrl-0 = <&touchscreen_default>;
