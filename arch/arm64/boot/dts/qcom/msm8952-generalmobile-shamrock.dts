@@ -228,6 +228,48 @@
 	};
 };
 
+&blsp1_i2c4 {
+	status = "okay";
+
+	/* Bosch BMI160 Accelerometer + Gyroscope IMU */
+	imu@68 {
+		compatible = "bosch,bmi160";
+		reg = <0x68>;
+		pinctrl-0 = <&bmi160_int1_default &bmi160_int2_default>;
+		pinctrl-names = "default";
+		interrupt-parent = <&tlmm>;
+		interrupts = <42 IRQ_TYPE_EDGE_RISING>;
+		interrupt-names = "INT1";
+		vdd-supply = <&pm8950_l17>;
+		vddio-supply = <&pm8950_l6>;
+		mount-matrix = "0", "1", "0",
+			       "1", "0", "0",
+			       "0", "0", "-1";
+	};
+
+	/* AKM AK09911 3-axis Electronic Compass / Magnetometer */
+	magnetometer@c {
+		compatible = "asahi-kasei,ak09911";
+		reg = <0x0c>;
+		pinctrl-0 = <&ak09911_default>;
+		pinctrl-names = "default";
+		vdd-supply = <&pm8950_l17>;
+		vid-supply = <&pm8950_l6>;
+		reset-gpios = <&tlmm 132 GPIO_ACTIVE_LOW>;
+		mount-matrix = "0", "-1", "0",
+			       "-1", "0", "0",
+			       "0", "0", "-1";
+	};
+
+	/* Lite-On LTR-559 / LTR-579 Ambient Light and Proximity Sensor */
+	light-sensor@53 {
+		compatible = "liteon,ltr559";
+		reg = <0x53>;
+		vdd-supply = <&pm8950_l17>;
+		vddio-supply = <&pm8950_l6>;
+	};
+};
+
 &mdss {
 	status = "okay";
 };
@@ -804,6 +846,27 @@
 
 	cam_sensor_vana_sleep: cam-sensor-sleep-state {
 		pins = "gpio133";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	bmi160_int1_default: bmi160-int1-default-state {
+		pins = "gpio42";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-down;
+	};
+
+	bmi160_int2_default: bmi160-int2-default-state {
+		pins = "gpio37";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-down;
+	};
+
+	ak09911_default: ak09911-default-state {
+		pins = "gpio132";
 		function = "gpio";
 		drive-strength = <2>;
 		bias-disable;
