@@ -272,6 +272,7 @@
 
 &mdss_dsi0_phy {
 	vddio-supply = <&pm8950_l6>;
+	qcom,mdss-dsi-continuous-clock;
 
 	status = "okay";
 };
