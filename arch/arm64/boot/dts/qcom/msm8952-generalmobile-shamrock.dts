@@ -284,7 +284,6 @@
 		compatible = "dijing,otm1901a";
 		reg = <0>;
 
-		backlight = <&pmi8950_wled>;
 		vsp-supply = <&lab>;
 		vsn-supply = <&ibb>;
 		reset-gpios = <&tlmm 0 GPIO_ACTIVE_HIGH>;
@@ -299,7 +298,6 @@
 
 &mdss_dsi0_phy {
 	vddio-supply = <&pm8950_l6>;
-	qcom,mdss-dsi-continuous-clock;
 
 	status = "okay";
 };
@@ -419,6 +417,11 @@
 	status = "okay";
 };
 
+/*
+ * Stock dijing OTM1901A uses bl_ctrl_dcs: mdss never registers the
+ * "bkl-trigger" so WLED keeps a constant sink current and the panel
+ * PWM (DCS 0x51) does the dimming. WLED is not linked to the panel.
+ */
 &pmi8950_wled {
 	qcom,enabled-strings = <0 1>;
 	qcom,current-limit-microamp = <30000>;
