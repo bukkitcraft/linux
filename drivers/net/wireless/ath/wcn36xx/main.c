@@ -311,6 +311,10 @@ static void wcn36xx_change_ps(struct wcn36xx *wcn, bool enable)
 	struct ieee80211_vif *vif = NULL;
 	struct wcn36xx_vif *tmp;
 
+	/* On Pronto v3 (MSM8952), entering BMPS causes halPMU haltACK crash */
+	if (wcn->is_pronto_v3)
+		return;
+
 	list_for_each_entry(tmp, &wcn->vif_list, list) {
 		vif = wcn36xx_priv_to_vif(tmp);
 		if (enable && !wcn->sw_scan) {

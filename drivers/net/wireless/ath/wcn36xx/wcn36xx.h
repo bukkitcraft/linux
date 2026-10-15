@@ -227,6 +227,7 @@ struct wcn36xx {
 	u8			wlan_version[WCN36XX_HAL_VERSION_LENGTH + 1];
 
 	bool		first_boot;
+	bool		is_started;
 
 	/* IRQs */
 	int			tx_irq;

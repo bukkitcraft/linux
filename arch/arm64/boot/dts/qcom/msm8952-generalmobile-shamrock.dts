@@ -452,20 +452,6 @@
 	status = "okay";
 };
 
-&wcnss {
-	vddpx-supply = <&pm8950_l5>;
-
-//	status = "okay";
-};
-
-&wcnss_iris {
-	compatible = "qcom,wcn3660b";
-
-	vddxo-supply = <&pm8950_l7>;
-	vddrfa-supply = <&pm8950_l19>;
-	vddpa-supply = <&pm8950_l9>;
-	vdddig-supply = <&pm8950_l5>;
-};
 
 &wcnss_mem {
 	status = "okay";
