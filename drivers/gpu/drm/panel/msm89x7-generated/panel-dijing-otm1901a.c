@@ -275,8 +275,8 @@ static int dijing_otm1901a_on(struct dijing_otm1901a *ctx)
 					 0x00, 0x00, 0x00, 0x00);
 	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0x00, 0x00);
 	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xff, 0xff, 0xff, 0xff);
-	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0x51, 0x00);
-	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0x53, 0x24);
+	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0x51, 0xff);
+	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0x53, 0x20);
 	mipi_dsi_dcs_exit_sleep_mode_multi(&dsi_ctx);
 	mipi_dsi_msleep(&dsi_ctx, 120);
 	mipi_dsi_dcs_set_display_on_multi(&dsi_ctx);
@@ -338,18 +338,18 @@ static int dijing_otm1901a_unprepare(struct drm_panel *panel)
 }
 
 static const struct drm_display_mode dijing_otm1901a_mode = {
-	.clock = (1080 + 90 + 20 + 60) * (1920 + 8 + 2 + 10) * 60 / 1000,
+	.clock = 145483,
 	.hdisplay = 1080,
 	.hsync_start = 1080 + 90,
 	.hsync_end = 1080 + 90 + 20,
-	.htotal = 1080 + 90 + 20 + 60,
+	.htotal = 1080 + 90 + 20 + 56,
 	.vdisplay = 1920,
-	.vsync_start = 1920 + 8,
-	.vsync_end = 1920 + 8 + 2,
-	.vtotal = 1920 + 8 + 2 + 10,
+	.vsync_start = 1920 + 14,
+	.vsync_end = 1920 + 14 + 2,
+	.vtotal = 1920 + 14 + 2 + 10,
 	.width_mm = 69,
 	.height_mm = 122,
-	.type = DRM_MODE_TYPE_DRIVER,
+	.type = DRM_MODE_TYPE_DRIVER | DRM_MODE_TYPE_PREFERRED,
 };
 
 static int dijing_otm1901a_get_modes(struct drm_panel *panel,
