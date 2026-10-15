@@ -34,11 +34,19 @@ struct dijing_otm1901a *to_dijing_otm1901a(struct drm_panel *panel)
 	return container_of_const(panel, struct dijing_otm1901a, panel);
 }
 
+/*
+ * Stock: qcom,mdss-dsi-reset-sequence = <1 20>, <0 10>, <1 20>
+ * and qcom,platform-reset-gpio = <&tlmm 0 0>, driven with raw
+ * gpio_set_value(). The DT describes the line as GPIO_ACTIVE_HIGH so
+ * logical values here equal the physical levels used by stock.
+ */
 static void dijing_otm1901a_reset(struct dijing_otm1901a *ctx)
 {
 	gpiod_set_value_cansleep(ctx->reset_gpio, 1);
 	msleep(20);
 	gpiod_set_value_cansleep(ctx->reset_gpio, 0);
+	usleep_range(10000, 11000);
+	gpiod_set_value_cansleep(ctx->reset_gpio, 1);
 	msleep(20);
 }
 
@@ -275,8 +283,9 @@ static int dijing_otm1901a_on(struct dijing_otm1901a *ctx)
 					 0x00, 0x00, 0x00, 0x00);
 	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0x00, 0x00);
 	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xff, 0xff, 0xff, 0xff);
-	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0x51, 0xff);
-	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0x53, 0x20);
+	/* Stock tail: 51 00, 53 24 (BCTRL | BL), then backlight via DCS */
+	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0x51, 0x00);
+	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0x53, 0x24);
 	mipi_dsi_dcs_exit_sleep_mode_multi(&dsi_ctx);
 	mipi_dsi_msleep(&dsi_ctx, 120);
 	mipi_dsi_dcs_set_display_on_multi(&dsi_ctx);
@@ -313,7 +322,7 @@ static int dijing_otm1901a_prepare(struct drm_panel *panel)
 	ret = dijing_otm1901a_on(ctx);
 	if (ret < 0) {
 		dev_err(dev, "Failed to initialize panel: %d\n", ret);
-		gpiod_set_value_cansleep(ctx->reset_gpio, 1);
+		gpiod_set_value_cansleep(ctx->reset_gpio, 0);
 		regulator_bulk_disable(ARRAY_SIZE(dijing_otm1901a_supplies), ctx->supplies);
 		return ret;
 	}
@@ -331,7 +340,8 @@ static int dijing_otm1901a_unprepare(struct drm_panel *panel)
 	if (ret < 0)
 		dev_err(dev, "Failed to un-initialize panel: %d\n", ret);
 
-	gpiod_set_value_cansleep(ctx->reset_gpio, 1);
+	/* Stock mdss_dsi_panel_reset(pdata, 0): reset line driven low */
+	gpiod_set_value_cansleep(ctx->reset_gpio, 0);
 	regulator_bulk_disable(ARRAY_SIZE(dijing_otm1901a_supplies), ctx->supplies);
 
 	return 0;
@@ -364,6 +374,54 @@ static const struct drm_panel_funcs dijing_otm1901a_panel_funcs = {
 	.get_modes = dijing_otm1901a_get_modes,
 };
 
+/*
+ * Stock uses qcom,mdss-dsi-bl-pmic-control-type = "bl_ctrl_dcs":
+ * mdss_dsi_panel_bklt_dcs() sends a single-byte DCS_WRITE1 {0x51, level}
+ * in HS mode, clamps non-zero levels to bl-min-level (1) and caps at
+ * bl-max-level (225). Brightness is never read back from the panel;
+ * a DCS read needs a bus turnaround which disturbs the video stream.
+ */
+#define OTM1901A_BL_MIN	1
+#define OTM1901A_BL_MAX	225
+
+static int dijing_otm1901a_bl_update_status(struct backlight_device *bl)
+{
+	struct mipi_dsi_device *dsi = bl_get_data(bl);
+	int brightness = backlight_get_brightness(bl);
+	u8 level;
+	int ret;
+
+	if (brightness && brightness < OTM1901A_BL_MIN)
+		brightness = OTM1901A_BL_MIN;
+	level = min(brightness, OTM1901A_BL_MAX);
+
+	dsi->mode_flags &= ~MIPI_DSI_MODE_LPM;
+	ret = mipi_dsi_dcs_write(dsi, MIPI_DCS_SET_DISPLAY_BRIGHTNESS,
+				 &level, sizeof(level));
+	dsi->mode_flags |= MIPI_DSI_MODE_LPM;
+
+	return ret < 0 ? ret : 0;
+}
+
+static const struct backlight_ops dijing_otm1901a_bl_ops = {
+	.options = BL_CORE_SUSPENDRESUME,
+	.update_status = dijing_otm1901a_bl_update_status,
+};
+
+static struct backlight_device *
+dijing_otm1901a_create_backlight(struct mipi_dsi_device *dsi)
+{
+	struct device *dev = &dsi->dev;
+	const struct backlight_properties props = {
+		.type = BACKLIGHT_RAW,
+		.brightness = OTM1901A_BL_MAX,
+		.max_brightness = OTM1901A_BL_MAX,
+	};
+
+	return devm_backlight_device_register(dev, dev_name(dev), dev, dsi,
+					      &dijing_otm1901a_bl_ops, &props);
+}
+
 
 static int dijing_otm1901a_probe(struct mipi_dsi_device *dsi)
 {
@@ -394,14 +452,21 @@ static int dijing_otm1901a_probe(struct mipi_dsi_device *dsi)
 
 	dsi->lanes = 4;
 	dsi->format = MIPI_DSI_FMT_RGB888;
+	/*
+	 * Stock has no qcom,mdss-dsi-force-clock-lane-hs, so the clock lane
+	 * is allowed to drop to LP between transfers (non-continuous).
+	 * EoT packets are appended (qcom,mdss-dsi-tx-eot-append), which is
+	 * the mainline default.
+	 */
 	dsi->mode_flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_MODE_VIDEO_BURST |
-			  MIPI_DSI_MODE_LPM;
+			  MIPI_DSI_CLOCK_NON_CONTINUOUS | MIPI_DSI_MODE_LPM;
 
 	ctx->panel.prepare_prev_first = true;
 
-	ret = drm_panel_of_backlight(&ctx->panel);
-	if (ret)
-		return dev_err_probe(dev, ret, "Failed to get backlight\n");
+	ctx->panel.backlight = dijing_otm1901a_create_backlight(dsi);
+	if (IS_ERR(ctx->panel.backlight))
+		return dev_err_probe(dev, PTR_ERR(ctx->panel.backlight),
+				     "Failed to create backlight\n");
 
 	drm_panel_add(&ctx->panel);
 

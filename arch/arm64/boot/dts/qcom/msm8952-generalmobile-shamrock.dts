@@ -287,7 +287,7 @@
 		backlight = <&pmi8950_wled>;
 		vsp-supply = <&lab>;
 		vsn-supply = <&ibb>;
-		reset-gpios = <&tlmm 0 GPIO_ACTIVE_LOW>;
+		reset-gpios = <&tlmm 0 GPIO_ACTIVE_HIGH>;
 
 		port {
 			panel_in: endpoint {
