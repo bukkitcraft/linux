@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// Copyright (c) 2026 FIXME
+// Copyright (c) 2026 Kadir / General Mobile GM 5 Plus Port
 // Generated with linux-mdss-dsi-panel-driver-generator from vendor device tree:
-//   Copyright (c) 2013, The Linux Foundation. All rights reserved. (FIXME)
+//   Copyright (c) 2013-2016, The Linux Foundation. All rights reserved.
 
 #include <linux/backlight.h>
 #include <linux/delay.h>
@@ -364,42 +364,6 @@ static const struct drm_panel_funcs dijing_otm1901a_panel_funcs = {
 	.get_modes = dijing_otm1901a_get_modes,
 };
 
-static int dijing_otm1901a_bl_update_status(struct backlight_device *bl)
-{
-	struct mipi_dsi_device *dsi = bl_get_data(bl);
-	u16 brightness = backlight_get_brightness(bl);
-	u8 val;
-	int ret;
-
-	if (brightness > 255)
-		brightness = 255;
-	val = brightness;
-
-	ret = mipi_dsi_dcs_write(dsi, MIPI_DCS_SET_DISPLAY_BRIGHTNESS,
-				 &val, sizeof(val));
-	if (ret < 0)
-		return ret;
-
-	return 0;
-}
-
-static const struct backlight_ops dijing_otm1901a_bl_ops = {
-	.update_status = dijing_otm1901a_bl_update_status,
-};
-
-static struct backlight_device *
-dijing_otm1901a_create_backlight(struct mipi_dsi_device *dsi)
-{
-	struct device *dev = &dsi->dev;
-	const struct backlight_properties props = {
-		.type = BACKLIGHT_RAW,
-		.brightness = 255,
-		.max_brightness = 255,
-	};
-
-	return devm_backlight_device_register(dev, dev_name(dev), dev, dsi,
-					      &dijing_otm1901a_bl_ops, &props);
-}
 
 static int dijing_otm1901a_probe(struct mipi_dsi_device *dsi)
 {
@@ -435,10 +399,9 @@ static int dijing_otm1901a_probe(struct mipi_dsi_device *dsi)
 
 	ctx->panel.prepare_prev_first = true;
 
-	ctx->panel.backlight = dijing_otm1901a_create_backlight(dsi);
-	if (IS_ERR(ctx->panel.backlight))
-		return dev_err_probe(dev, PTR_ERR(ctx->panel.backlight),
-				     "Failed to create backlight\n");
+	ret = drm_panel_of_backlight(&ctx->panel);
+	if (ret)
+		return dev_err_probe(dev, ret, "Failed to get backlight\n");
 
 	drm_panel_add(&ctx->panel);
 
@@ -464,7 +427,7 @@ static void dijing_otm1901a_remove(struct mipi_dsi_device *dsi)
 }
 
 static const struct of_device_id dijing_otm1901a_of_match[] = {
-	{ .compatible = "dijing,otm1901a" }, // FIXME
+	{ .compatible = "dijing,otm1901a" },
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, dijing_otm1901a_of_match);
@@ -479,6 +442,6 @@ static struct mipi_dsi_driver dijing_otm1901a_driver = {
 };
 module_mipi_dsi_driver(dijing_otm1901a_driver);
 
-MODULE_AUTHOR("linux-mdss-dsi-panel-driver-generator <fix@me>"); // FIXME
-MODULE_DESCRIPTION("DRM driver for dijing OTM1901A 1080p video mode dsi panel");
+MODULE_AUTHOR("Kadir <kadir@localhost>");
+MODULE_DESCRIPTION("DRM driver for Dijing OTM1901A 1080p video mode DSI panel");
 MODULE_LICENSE("GPL");

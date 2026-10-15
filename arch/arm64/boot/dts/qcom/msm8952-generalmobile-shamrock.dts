@@ -354,7 +354,7 @@
 };
 
 &ipa {
-	status = "okay";
+	status = "disabled";
 };
 
 &pmi8950_haptics {
