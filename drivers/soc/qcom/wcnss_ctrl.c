@@ -181,7 +181,7 @@ static int wcnss_request_version(struct wcnss_ctrl *wcnss)
 	if (ret < 0)
 		return ret;
 
-	ret = wait_for_completion_timeout(&wcnss->ack, WCNSS_CBC_TIMEOUT);
+	ret = wait_for_completion_timeout(&wcnss->ack, WCNSS_REQUEST_TIMEOUT);
 	if (!ret) {
 		dev_err(wcnss->dev, "timeout waiting for version response\n");
 		return -ETIMEDOUT;
@@ -303,9 +303,15 @@ static void wcnss_async_probe(struct work_struct *work)
 	if (ret < 0)
 		return;
 
-	/* Wait for pending cold boot completion if indicated by the nv downloader */
+	/*
+	 * Wait for pending cold boot completion if indicated by the nv
+	 * downloader. Calibration can take several seconds on Pronto v3
+	 * (MSM8952); the downstream prima driver waits up to 10 s for it
+	 * (HAVE_CBC_DONE in hdd_wlan_startup()). Starting the WLAN core
+	 * before CBC is done makes HAL_START fail.
+	 */
 	if (expect_cbc) {
-		ret = wait_for_completion_timeout(&wcnss->cbc, WCNSS_REQUEST_TIMEOUT);
+		ret = wait_for_completion_timeout(&wcnss->cbc, WCNSS_CBC_TIMEOUT);
 		if (!ret)
 			dev_err(wcnss->dev, "expected cold boot completion\n");
 	}
