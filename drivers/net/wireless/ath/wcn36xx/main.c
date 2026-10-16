@@ -236,7 +236,13 @@ static int wcn36xx_start(struct ieee80211_hw *hw)
 		goto out_free_dxe_pool;
 	}
 
-	/* NV is already downloaded by qcom_wcnss_ctrl */
+	/* Same order as downstream prima vos_start(): NV download, then start */
+	ret = wcn36xx_smd_load_nv(wcn);
+	if (ret) {
+		wcn36xx_err("Failed to push NV to chip\n");
+		goto out_free_dxe_ctl;
+	}
+
 	ret = wcn36xx_smd_start(wcn);
 	if (ret) {
 		wcn36xx_err("Failed to start chip\n");

@@ -674,13 +674,24 @@ int wcn36xx_smd_stop(struct wcn36xx *wcn)
 	mutex_lock(&wcn->hal_mutex);
 	INIT_HAL_MSG(msg_body, WCN36XX_HAL_STOP_REQ);
 
-	msg_body.stop_req_params.reason = HAL_STOP_TYPE_SYS_DEEP_SLEEP;
+	/* Same as downstream prima vos_stop(): RF_KILL and wait for STOP_RSP */
+	msg_body.stop_req_params.reason = HAL_STOP_TYPE_RF_KILL;
 
 	PREPARE_HAL_BUF(wcn->hal_buf, msg_body);
 
-	ret = rpmsg_send(wcn->smd_channel, wcn->hal_buf, msg_body.header.len);
+	ret = wcn36xx_smd_send_and_wait(wcn, msg_body.header.len);
+	if (ret) {
+		wcn36xx_err("Sending hal_stop failed\n");
+		goto out;
+	}
+	ret = wcn36xx_smd_rsp_status_check(wcn->hal_buf, wcn->hal_rsp_len);
+	if (ret) {
+		wcn36xx_err("hal_stop response failed err=%d\n", ret);
+		goto out;
+	}
+out:
 	mutex_unlock(&wcn->hal_mutex);
-	return 0;
+	return ret;
 }
 
 int wcn36xx_smd_init_scan(struct wcn36xx *wcn, enum wcn36xx_hal_sys_mode mode,
@@ -3296,6 +3307,14 @@ int wcn36xx_smd_rsp_process(struct rpmsg_device *rpdev,
 		queue_work(wcn->hal_ind_wq, &wcn->hal_ind_work);
 		spin_unlock(&wcn->hal_ind_lock);
 		wcn36xx_dbg(WCN36XX_DBG_HAL, "indication arrived\n");
+		break;
+	case WCN36XX_HAL_LOST_LINK_PARAMETERS_IND:
+		/*
+		 * Informational only: sent by Pronto firmware when a link is
+		 * torn down. Downstream prima just records the RSSI from it
+		 * (hdd rssi_on_disconnect); mac80211 does not need it.
+		 */
+		wcn36xx_dbg(WCN36XX_DBG_HAL, "lost link parameters ind\n");
 		break;
 	default:
 		wcn36xx_err("SMD_EVENT (%d) not supported\n",
