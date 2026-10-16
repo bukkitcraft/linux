@@ -7,6 +7,8 @@
 
 #include <dt-bindings/clock/qcom,dsi-phy-28nm.h>
 #include <dt-bindings/clock/qcom,gcc-msm8952.h>
+#include <dt-bindings/interconnect/qcom,msm8953.h>
+#include <dt-bindings/interconnect/qcom,rpm-icc.h>
 #include <dt-bindings/clock/qcom,rpmcc.h>
 #include <dt-bindings/interrupt-controller/arm-gic.h>
 #include <dt-bindings/power/qcom-rpmpd.h>
@@ -771,6 +773,30 @@
 			clock-names = "core";
 		};
 
+		/*
+		 * Stock msm8952-bus.dtsi: bimc/snoc/snoc-mm masters, QoS
+		 * ports and modes (MDP qport 7 bypass -> snoc_bimc_0 -> EBI)
+		 * match the mainline msm8953 ICC driver. PCNOC does NOT
+		 * match (8953 has USB3 at qport 11, 8952 has lpass/sdcc),
+		 * so pcnoc is intentionally not described here.
+		 */
+		bimc: interconnect@400000 {
+			compatible = "qcom,msm8953-bimc";
+			reg = <0x00400000 0x5a000>;
+			#interconnect-cells = <2>;
+		};
+
+		snoc: interconnect@580000 {
+			compatible = "qcom,msm8953-snoc";
+			reg = <0x00580000 0x16080>;
+			#interconnect-cells = <2>;
+
+			snoc_mm: interconnect-snoc {
+				compatible = "qcom,msm8953-snoc-mm";
+				#interconnect-cells = <2>;
+			};
+		};
+
 		tsens: thermal-sensor@4a9000 {
 			compatible = "qcom,msm8952-tsens", "qcom,tsens-v1";
 			reg = <0x004a9000 0x1000>, /* TM */
@@ -1448,6 +1474,11 @@
 				power-domains = <&gcc MDSS_GDSC>;
 
 				iommus = <&apps_iommu 0x17>;
+
+				/* Stock: mas-mdp (snoc-mm) -> slv-ebi (bimc) */
+				interconnects = <&snoc_mm MAS_MDP RPM_ALWAYS_TAG
+						 &bimc SLV_EBI RPM_ALWAYS_TAG>;
+				interconnect-names = "mdp0-mem";
 
 				ports {
 					#address-cells = <1>;
