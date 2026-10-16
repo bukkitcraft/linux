@@ -2172,7 +2172,16 @@ int msm_dsi_host_xfer_prepare(struct mipi_dsi_host *host,
 	 * mdp clock need to be enabled to receive dsi interrupt
 	 */
 	pm_runtime_get_sync(&msm_host->pdev->dev);
-	cfg_hnd->ops->link_clk_set_rate(msm_host);
+	/*
+	 * Link clock rates are already programmed by
+	 * msm_dsi_host_power_on(). Re-setting them here while video is
+	 * streaming makes the 28nm PLL (whose determine_rate does not
+	 * round to the achievable rate) get fully reprogrammed on every
+	 * command, which causes MDP underruns and eventually PLL unlock
+	 * (panel goes dark) under rapid DCS backlight updates.
+	 */
+	if (!msm_host->power_on)
+		cfg_hnd->ops->link_clk_set_rate(msm_host);
 	cfg_hnd->ops->link_clk_enable(msm_host);
 
 	/* TODO: vote for bus bandwidth */
