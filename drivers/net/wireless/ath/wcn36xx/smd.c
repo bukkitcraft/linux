@@ -3286,6 +3286,12 @@ int wcn36xx_smd_rsp_process(struct rpmsg_device *rpdev,
 		memcpy(msg_ind->msg, buf, len);
 
 		spin_lock(&wcn->hal_ind_lock);
+		if (!wcn->hal_ind_wq) {
+			/* SMD already closed (e.g. failed start), drop it */
+			spin_unlock(&wcn->hal_ind_lock);
+			kfree(msg_ind);
+			break;
+		}
 		list_add_tail(&msg_ind->list, &wcn->hal_ind_queue);
 		queue_work(wcn->hal_ind_wq, &wcn->hal_ind_work);
 		spin_unlock(&wcn->hal_ind_lock);
@@ -3364,13 +3370,18 @@ static void wcn36xx_ind_smd_work(struct work_struct *work)
 
 int wcn36xx_smd_open(struct wcn36xx *wcn)
 {
-	wcn->hal_ind_wq = create_freezable_workqueue("wcn36xx_smd_ind");
-	if (!wcn->hal_ind_wq)
+	struct workqueue_struct *wq;
+	unsigned long flags;
+
+	wq = create_freezable_workqueue("wcn36xx_smd_ind");
+	if (!wq)
 		return -ENOMEM;
 
 	INIT_WORK(&wcn->hal_ind_work, wcn36xx_ind_smd_work);
-	INIT_LIST_HEAD(&wcn->hal_ind_queue);
-	spin_lock_init(&wcn->hal_ind_lock);
+
+	spin_lock_irqsave(&wcn->hal_ind_lock, flags);
+	wcn->hal_ind_wq = wq;
+	spin_unlock_irqrestore(&wcn->hal_ind_lock, flags);
 
 	return 0;
 }
@@ -3378,10 +3389,27 @@ int wcn36xx_smd_open(struct wcn36xx *wcn)
 void wcn36xx_smd_close(struct wcn36xx *wcn)
 {
 	struct wcn36xx_hal_ind_msg *msg, *tmp;
+	struct workqueue_struct *wq;
+	unsigned long flags;
+
+	/*
+	 * The SMD channel stays open after mac80211 stop/failed start, so
+	 * the firmware can still deliver indications from IRQ context.
+	 * Unpublish the workqueue under hal_ind_lock first so
+	 * wcn36xx_smd_rsp_process() never queues on a destroyed one.
+	 */
+	spin_lock_irqsave(&wcn->hal_ind_lock, flags);
+	wq = wcn->hal_ind_wq;
+	wcn->hal_ind_wq = NULL;
+	spin_unlock_irqrestore(&wcn->hal_ind_lock, flags);
 
 	cancel_work_sync(&wcn->hal_ind_work);
-	destroy_workqueue(wcn->hal_ind_wq);
+	destroy_workqueue(wq);
 
-	list_for_each_entry_safe(msg, tmp, &wcn->hal_ind_queue, list)
+	spin_lock_irqsave(&wcn->hal_ind_lock, flags);
+	list_for_each_entry_safe(msg, tmp, &wcn->hal_ind_queue, list) {
+		list_del(&msg->list);
 		kfree(msg);
+	}
+	spin_unlock_irqrestore(&wcn->hal_ind_lock, flags);
 }

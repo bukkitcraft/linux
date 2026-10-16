@@ -1584,6 +1584,12 @@ static int wcn36xx_probe(struct platform_device *pdev)
 	wcn->first_boot = true;
 	mutex_init(&wcn->conf_mutex);
 	mutex_init(&wcn->hal_mutex);
+	/*
+	 * Initialised once here: the SMD channel (and its IRQ-context
+	 * callback) outlives wcn36xx_smd_open()/close().
+	 */
+	spin_lock_init(&wcn->hal_ind_lock);
+	INIT_LIST_HEAD(&wcn->hal_ind_queue);
 	mutex_init(&wcn->scan_lock);
 	__skb_queue_head_init(&wcn->amsdu);
 
