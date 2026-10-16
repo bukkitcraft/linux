@@ -247,7 +247,11 @@
 		touchscreen-size-y = <1920>;
 	};
 
-	/* Goodix GT970 / GT911 Touchscreen */
+	/* Goodix GT970 / GT911 Touchscreen
+	 * Stock: goodix@5d, compatible "goodix,gt9xx", cfg-data0 = 186 bytes
+	 * GPIO64 = reset (shared with Synaptics/Himax), GPIO65 = irq
+	 * Config firmware: 186 bytes extracted from stock cfg-data0
+	 */
 	touchscreen@5d {
 		compatible = "goodix,gt970", "goodix,gt911";
 		reg = <0x5d>;
@@ -262,6 +266,9 @@
 
 		touchscreen-size-x = <1080>;
 		touchscreen-size-y = <1920>;
+
+		/* Point to the correct 186-byte GT911-format config */
+		goodix,config-name = "goodix_gt970_cfg.bin";
 	};
 };
 
