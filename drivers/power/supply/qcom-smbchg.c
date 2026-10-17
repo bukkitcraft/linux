@@ -413,15 +413,22 @@ out:
  * @brief smbchg_usb_aicl_enable() - Enable AICL on the USB charge path
  *
  * @param chip Pointer to smbchg_chip
+ * @param max_ua Upper input current limit AICL may settle at, in uA
  * @return 0 on success, -errno on failure
  *
  * @details: Enable Automatic Input Current Limiting (AICL) on the USB
  * charge path. This will automatically enforce a suitable input current
- * limit. Set a limit with smbchg_usb_set_ilim_hc to disable.
+ * limit, never above max_ua. Set a limit with smbchg_usb_set_ilim_hc to
+ * disable.
  */
-static int smbchg_usb_aicl_enable(struct smbchg_chip *chip)
+static int smbchg_usb_aicl_enable(struct smbchg_chip *chip, int max_ua)
 {
+	size_t ilim_index;
 	int ret;
+
+	/* Same guard as smbchg_usb_set_ilim_hc(): index must not wrap */
+	if (max_ua < chip->data->ilim_table[0])
+		return -EINVAL;
 
 	/* Clear AICL override to make its input current limits effective */
 	ret = regmap_update_bits(chip->regmap,
@@ -444,20 +451,23 @@ static int smbchg_usb_aicl_enable(struct smbchg_chip *chip)
 	if (ret) {
 		dev_err(chip->dev, "Failed to set high current mode: %pe\n",
 			ERR_PTR(ret));
-		return IRQ_NONE;
+		return ret;
 	}
 
 	/*
 	 * AICL limits itself by the HC mode current limit index set in the
-	 * USB_CHGPTH_IL_CFG register. Set it to the maximum index to allow
-	 * AICL to get the highest possible input current limit.
+	 * USB_CHGPTH_IL_CFG register. Like downstream (usb_icl_votable ->
+	 * smbchg_set_high_usb_chg_current()), program the per port type
+	 * limit there and let AICL find the highest current the adapter can
+	 * deliver up to it. Round down so the limit is never exceeded.
 	 * Since AICL override was cleared, setting this index will not
 	 * affect the live input current limit.
 	 */
+	ilim_index = find_closest_smaller(max_ua, chip->data->ilim_table,
+					  (unsigned int)chip->data->ilim_table_len);
 	ret = qcom_pmic_sec_masked_write(chip->regmap,
 					 chip->base + SMBCHG_USB_CHGPTH_IL_CFG,
-					 USBIN_INPUT_MASK,
-					 chip->data->ilim_table_len - 1);
+					 USBIN_INPUT_MASK, ilim_index);
 	if (ret) {
 		dev_err(chip->dev, "Failed to set current limit index: %pe\n",
 			ERR_PTR(ret));
@@ -738,12 +748,55 @@ static int smbchg_otg_switch(struct smbchg_chip *chip, bool enable)
 	dev_dbg(chip->dev, "%sabling OTG VBUS regulator",
 			enable ? "En" : "Dis");
 
+	/*
+	 * Downstream smbchg_otg_regulator_enable(): disable boost pulse
+	 * skipping while OTG is on, and give it time to take effect. While
+	 * sourcing VBUS, also keep HVDCP detection off so the boost output
+	 * is never treated as a QC adapter (smbchg_external_otg_regulator_*
+	 * clears HVDCP_EN for the same reason).
+	 */
+	if (enable) {
+		ret = qcom_pmic_sec_masked_write(chip->regmap,
+						 chip->base + SMBCHG_OTG_TRIM6,
+						 TR_ENB_SKIP_BIT, TR_ENB_SKIP_BIT);
+		if (ret)
+			dev_err(chip->dev, "Failed to disable OTG pulse skip: %pe\n",
+				ERR_PTR(ret));
+
+		if (chip->data->smbchg_lite) {
+			cancel_delayed_work(&chip->hvdcp_det_work);
+			chip->hvdcp_active = false;
+			ret = qcom_pmic_sec_masked_write(chip->regmap,
+							 chip->base + SMBCHG_USB_CHGPTH_CFG,
+							 HVDCP_ADAPTER_SEL_MASK | HVDCP_EN_BIT,
+							 HVDCP_ADAPTER_SEL_5V);
+			if (ret)
+				dev_err(chip->dev, "Failed to disable HVDCP: %pe\n",
+					ERR_PTR(ret));
+		}
+
+		msleep(20);
+	}
+
 	ret = regmap_update_bits(chip->regmap,
 				 chip->base + SMBCHG_BAT_IF_CMD_CHG, OTG_EN_BIT,
 				 enable ? OTG_EN_BIT : 0);
 	if (ret)
 		dev_err(chip->dev, "Failed to %sable OTG regulator: %d\n",
 			enable ? "en" : "dis", ret);
+
+	if (!enable) {
+		if (qcom_pmic_sec_masked_write(chip->regmap,
+					       chip->base + SMBCHG_OTG_TRIM6,
+					       TR_ENB_SKIP_BIT, 0))
+			dev_err(chip->dev, "Failed to re-enable OTG pulse skip\n");
+
+		if (chip->data->smbchg_lite &&
+		    qcom_pmic_sec_masked_write(chip->regmap,
+					       chip->base + SMBCHG_USB_CHGPTH_CFG,
+					       HVDCP_EN_BIT, HVDCP_EN_BIT))
+			dev_err(chip->dev, "Failed to re-enable HVDCP\n");
+	}
 
 	return ret;
 }
@@ -760,6 +813,9 @@ static int smbchg_otg_enable(struct regulator_dev *rdev)
 
 	WARN_ON_ONCE(chip->role_sw);
 
+	/* serialise against hvdcp_det_work / detect_work */
+	guard(mutex)(&chip->otg_lock);
+
 	return smbchg_otg_switch(chip, true);
 }
 
@@ -772,6 +828,8 @@ static int smbchg_otg_enable(struct regulator_dev *rdev)
 static int smbchg_otg_disable(struct regulator_dev *rdev)
 {
 	struct smbchg_chip *chip = rdev_get_drvdata(rdev);
+
+	guard(mutex)(&chip->otg_lock);
 
 	return smbchg_otg_switch(chip, false);
 }
@@ -898,6 +956,177 @@ static bool smbchg_check_role_switch(struct smbchg_chip *chip, bool otg_present)
 	return false;
 }
 
+/**
+ * @brief smbchg_usb_is_9v() - Check whether USBIN is running at 9 V
+ *
+ * @param chip Pointer to smbchg_chip
+ * @return true if the charger reports a 9 V input
+ */
+static bool smbchg_usb_is_9v(struct smbchg_chip *chip)
+{
+	u32 value;
+
+	if (regmap_read(chip->regmap,
+			chip->base + SMBCHG_USB_CHGPTH_INPUT_STS, &value))
+		return false;
+
+	return !!(value & USBIN_9V);
+}
+
+/**
+ * @brief smbchg_hvdcp_is_present() - Check for a detected HVDCP (QC 2.0)
+ *
+ * @param chip Pointer to smbchg_chip
+ * @return true if the charger detected an HVDCP and USB is still present
+ *
+ * @details: Same as downstream is_hvdcp_present() for SCHG_LITE (PMI8950).
+ */
+static bool smbchg_hvdcp_is_present(struct smbchg_chip *chip)
+{
+	u32 value;
+	int ret;
+
+	ret = regmap_read(chip->regmap,
+			  chip->base + SMBCHG_USB_CHGPTH_USBIN_HVDCP_STS, &value);
+	if (ret) {
+		dev_err(chip->dev, "Failed to read HVDCP status: %pe\n",
+			ERR_PTR(ret));
+		return false;
+	}
+
+	return (value & SCHG_LITE_USBIN_HVDCP_SEL_BIT) &&
+	       smbchg_usb_is_present(chip);
+}
+
+/**
+ * @brief smbchg_hvdcp_force_9v() - Negotiate 9 V with a QC 2.0 adapter
+ *
+ * @param chip Pointer to smbchg_chip
+ * @return 0 on success, -errno on failure
+ *
+ * @details: Downstream force_9v_hvdcp(), used on PMI8950 rev >= 2.0
+ * (SMBCHG_HVDCP_9V_EN_WA): select 5 V, pulse FORCE_HVDCP_2P0, wait for
+ * the QC 2.0 handshake, then select 9 V. 12 V is never requested; the
+ * adapter allowance stays at 5V_9V_CONT.
+ */
+static int smbchg_hvdcp_force_9v(struct smbchg_chip *chip)
+{
+	int ret;
+
+	ret = qcom_pmic_sec_masked_write(chip->regmap,
+					 chip->base + SMBCHG_USB_CHGPTH_CFG,
+					 HVDCP_ADAPTER_SEL_MASK,
+					 HVDCP_ADAPTER_SEL_5V);
+	if (ret) {
+		dev_err(chip->dev, "Failed to select 5V HVDCP: %pe\n",
+			ERR_PTR(ret));
+		return ret;
+	}
+
+	ret = regmap_update_bits(chip->regmap,
+				 chip->base + SMBCHG_USB_CHGPTH_CMD_HVDCP_1,
+				 FORCE_HVDCP_2P0_BIT, FORCE_HVDCP_2P0_BIT);
+	ret |= regmap_update_bits(chip->regmap,
+				  chip->base + SMBCHG_USB_CHGPTH_CMD_HVDCP_1,
+				  FORCE_HVDCP_2P0_BIT, 0);
+	if (ret) {
+		dev_err(chip->dev, "Failed to force QC2.0: %pe\n",
+			ERR_PTR(ret));
+		return ret;
+	}
+
+	/* wait for QC2.0 */
+	msleep(SMBCHG_HVDCP_FORCE_MS);
+
+	ret = qcom_pmic_sec_masked_write(chip->regmap,
+					 chip->base + SMBCHG_USB_CHGPTH_CFG,
+					 HVDCP_ADAPTER_SEL_MASK,
+					 HVDCP_ADAPTER_SEL_9V);
+	if (ret)
+		dev_err(chip->dev, "Failed to select 9V HVDCP: %pe\n",
+			ERR_PTR(ret));
+
+	return ret;
+}
+
+/**
+ * @brief smbchg_hvdcp_restore() - Undo HVDCP state on USB removal
+ *
+ * @param chip Pointer to smbchg_chip
+ *
+ * @details: Downstream restore_from_hvdcp_detection() minus the HVDCP3
+ * and parallel charger parts. The adapter selection is left at 5 V here
+ * (downstream leaves 9 V); a newly plugged adapter starts at 5 V either
+ * way and only goes to 9 V after a successful QC 2.0 handshake, so the
+ * safer value is used.
+ */
+static void smbchg_hvdcp_restore(struct smbchg_chip *chip)
+{
+	int ret;
+
+	chip->hvdcp_active = false;
+
+	ret = qcom_pmic_sec_masked_write(chip->regmap,
+					 chip->base + SMBCHG_USB_CHGPTH_CFG,
+					 HVDCP_ADAPTER_SEL_MASK | HVDCP_EN_BIT,
+					 HVDCP_ADAPTER_SEL_5V | HVDCP_EN_BIT);
+	if (ret)
+		dev_err(chip->dev, "Failed to restore HVDCP config: %pe\n",
+			ERR_PTR(ret));
+
+	ret = qcom_pmic_sec_masked_write(chip->regmap,
+					 chip->base + SMBCHG_USB_CHGPTH_USBIN_CHGR_CFG,
+					 ADAPTER_ALLOWANCE_MASK,
+					 USBIN_ADAPTER_5V_9V_CONT);
+	if (ret)
+		dev_err(chip->dev, "Failed to restore adapter allowance: %pe\n",
+			ERR_PTR(ret));
+}
+
+static void smbchg_hvdcp_det_work(struct work_struct *work)
+{
+	struct smbchg_chip *chip =
+		container_of(work, struct smbchg_chip, hvdcp_det_work.work);
+	int ret;
+
+	guard(mutex)(&chip->otg_lock);
+
+	if (chip->hvdcp_active ||
+	    smbchg_usb_get_type(chip) != POWER_SUPPLY_USB_TYPE_DCP ||
+	    !smbchg_hvdcp_is_present(chip))
+		return;
+
+	ret = smbchg_hvdcp_force_9v(chip);
+	if (ret) {
+		dev_err(chip->dev,
+			"Could not force 9V HVDCP, continuing: %pe\n",
+			ERR_PTR(ret));
+	}
+
+	/*
+	 * Re-check after the handshake: the cable may have been pulled
+	 * during the 500 ms wait.
+	 */
+	if (!smbchg_hvdcp_is_present(chip)) {
+		smbchg_hvdcp_restore(chip);
+		return;
+	}
+
+	/* Downstream: POWER_SUPPLY_TYPE_USB_HVDCP -> default_hvdcp_icl_ma */
+	ret = smbchg_usb_aicl_enable(chip, SMBCHG_HVDCP_ICL_UA);
+	if (ret) {
+		dev_err(chip->dev, "Failed to set HVDCP current limit: %pe\n",
+			ERR_PTR(ret));
+		return;
+	}
+
+	chip->hvdcp_active = true;
+	dev_info(chip->dev, "HVDCP adapter detected, input %s\n",
+		 smbchg_usb_is_9v(chip) ? "9V" : "5V");
+
+	power_supply_changed(chip->usb_psy);
+}
+
 static void smbchg_detect_work(struct work_struct *work)
 {
 	struct smbchg_chip *chip =
@@ -918,16 +1147,32 @@ static void smbchg_detect_work(struct work_struct *work)
 		smbchg_otg_switch(chip, false);
 
 	/*
+	 * A quick unplug/replug may never be seen as "not present", so do
+	 * not trust a stale HVDCP session: drop it if the charger no longer
+	 * reports an HVDCP, falling back to the plain DCP/CDP limits below.
+	 */
+	if (chip->hvdcp_active && !smbchg_hvdcp_is_present(chip) &&
+	    chip->data->smbchg_lite)
+		smbchg_hvdcp_restore(chip);
+
+	/*
 	 * Prepare for running AICL to find a suitable input current
 	 * limit if connected to a DCP or a CDP
 	 */
 	if (usb_present && (usb_type == POWER_SUPPLY_USB_TYPE_DCP ||
-			    usb_type == POWER_SUPPLY_USB_TYPE_CDP)) {
+			    usb_type == POWER_SUPPLY_USB_TYPE_CDP) &&
+	    !chip->hvdcp_active) {
 		/*
 		 * Enable AICL to find a suitable current limit for the
-		 * newly plugged into port.
+		 * newly plugged into port, capped like downstream
+		 * smbchg_change_usb_supply_type(): 1500 mA on a CDP,
+		 * 1800 mA on a DCP. HVDCP is handled by hvdcp_det_work,
+		 * and this branch is skipped while an HVDCP session is
+		 * active so a re-run does not lower its limit.
 		 */
-		ret = smbchg_usb_aicl_enable(chip);
+		ret = smbchg_usb_aicl_enable(chip,
+					     usb_type == POWER_SUPPLY_USB_TYPE_CDP ?
+					     SMBCHG_CDP_ICL_UA : SMBCHG_DCP_ICL_UA);
 		if (ret) {
 			dev_err(chip->dev, "Failed to enable AICL: %pe\n",
 				ERR_PTR(ret));
@@ -941,6 +1186,44 @@ static void smbchg_detect_work(struct work_struct *work)
 				"Failed to enable USB charge path: %pe\n",
 				ERR_PTR(ret));
 			return;
+		}
+
+		/*
+		 * Downstream handle_usb_insertion(): look for a QC 2.0
+		 * adapter HVDCP_NOTIFY_MS after a DCP was found. PMI8950
+		 * only (SCHG_LITE, SMBCHG_HVDCP_9V_EN_WA).
+		 */
+		if (usb_type == POWER_SUPPLY_USB_TYPE_DCP &&
+		    chip->data->smbchg_lite)
+			mod_delayed_work(system_percpu_wq, &chip->hvdcp_det_work,
+					 msecs_to_jiffies(SMBCHG_HVDCP_NOTIFY_MS));
+	} else if (usb_present && usb_type == POWER_SUPPLY_USB_TYPE_SDP) {
+		/*
+		 * Apply the budget the USB gadget negotiated with the host
+		 * (see set_property). A freshly plugged SDP always gets at
+		 * least the 100 mA unit load, which also lifts a USB
+		 * suspend left over from a previous bus suspend/disconnect
+		 * (downstream: vote(USB_EN_VOTER, false) once > 2 mA).
+		 */
+		ret = smbchg_usb_set_ilim(chip,
+					  max(chip->sdp_ilim_ua,
+					      smbchg_lc_ilim_options[0]));
+		if (ret < 0)
+			dev_err(chip->dev, "Failed to set SDP current limit: %pe\n",
+				ERR_PTR(ret));
+	} else if (!usb_present) {
+		/* Start the next SDP session from the unconfigured 100 mA */
+		chip->sdp_ilim_ua = smbchg_lc_ilim_options[0];
+
+		/*
+		 * Downstream handle_usb_removal(): drop a pending HVDCP
+		 * detection and return to 5 V. hvdcp_det_work takes
+		 * otg_lock and re-checks USB presence itself, so it is only
+		 * cancelled here, not waited for.
+		 */
+		if (chip->data->smbchg_lite) {
+			cancel_delayed_work(&chip->hvdcp_det_work);
+			smbchg_hvdcp_restore(chip);
 		}
 	}
 
@@ -1116,14 +1399,13 @@ static irqreturn_t smbchg_handle_aicl_done(int irq, void *data)
 {
 	struct smbchg_chip *chip = data;
 	int ilim;
-	int ret;
 
 	dev_dbg(chip->dev, "AICL done");
 
 	ilim = smbchg_usb_get_ilim(chip);
 	if (ilim < 0)
 		dev_warn(chip->dev, "Failed to read AICL result: %pe\n",
-			 ERR_PTR(ret));
+			 ERR_PTR(ilim));
 	else
 		dev_dbg(chip->dev, "AICL result: %uuA", ilim);
 
@@ -1391,7 +1673,34 @@ static int smbchg_set_property(struct power_supply *psy,
 		ret = smbchg_charging_set_ilim(chip, val->intval);
 		break;
 	case POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT:
-		ret = smbchg_usb_set_ilim(chip, val->intval);
+		/*
+		 * The USB gadget reports its negotiated VBUS budget here
+		 * (100 mA unconfigured, 500 mA configured, 2 mA suspended,
+		 * 0 on disconnect). Like downstream msm_otg_set_power() and
+		 * smbchg_set_usb_current_max(), only honour it on an SDP:
+		 * DCP/CDP limits come from AICL and must not be overridden
+		 * by the gadget. Never allow more than the USB 2.0 SDP
+		 * maximum through this path. A budget below 100 mA (bus
+		 * suspend / disconnect) suspends the USB charge path, as
+		 * downstream does for <= 2 mA; detect_work re-enables it on
+		 * the next SDP insertion.
+		 *
+		 * The value is remembered so that detect_work can apply it
+		 * once APSD has identified an SDP, in case the gadget got
+		 * configured before port type detection finished.
+		 */
+		if (val->intval < 0 || val->intval > 500000)
+			return -EINVAL;
+
+		scoped_guard(mutex, &chip->otg_lock) {
+			chip->sdp_ilim_ua = val->intval;
+
+			if (smbchg_usb_get_type(chip) !=
+			    POWER_SUPPLY_USB_TYPE_SDP)
+				return -EPERM;
+
+			ret = smbchg_usb_set_ilim(chip, chip->sdp_ilim_ua);
+		}
 		if (ret > 0)
 			ret = 0;
 		break;
@@ -1486,12 +1795,34 @@ static int smbchg_init(struct smbchg_chip *chip)
 	if (ret)
 		return ret;
 
-	/* Set recharge threshold to 100mV */
+	/*
+	 * Set recharge threshold to 200mV, as downstream does with
+	 * qcom,resume-delta-mv = <200> (>= rchg_thr_mv of the PMI8994/8950
+	 * tables selects the 200 mV level).
+	 */
 	ret = qcom_pmic_sec_masked_write(chip->regmap,
 					 chip->base + SMBCHG_CHGR_CFG,
-					 RCHG_LVL_BIT, RCHG_THRESH_100MV);
+					 RCHG_LVL_BIT, RCHG_THRESH_200MV);
 	if (ret)
 		return ret;
+
+	/*
+	 * Fast charge current used while the battery is in the JEITA soft
+	 * warm (>45 C) or soft cool (<0 C) zone. Downstream sets this from
+	 * qcom,fastchg-current-comp = <700>, which is index 1 of the
+	 * PMI8994/PMI8950 table {250, 700, 900, 1200} mA.
+	 */
+	if (chip->data->smbchg_lite) {
+		ret = qcom_pmic_sec_masked_write(chip->regmap,
+						 chip->base + SMBCHG_CHGR_FCC_CMP_CFG,
+						 FCC_COMP_MASK, FCC_COMP_700MA);
+		if (ret) {
+			dev_err(chip->dev,
+				"Failed to set JEITA charge current: %pe\n",
+				ERR_PTR(ret));
+			return ret;
+		}
+	}
 
 	/* Set termination current */
 	if (chip->batt_info->charge_term_current_ua != -EINVAL) {
@@ -1601,9 +1932,17 @@ static int smbchg_probe(struct platform_device *pdev)
 	}
 
 	spin_lock_init(&chip->sec_access_lock);
+	chip->sdp_ilim_ua = smbchg_lc_ilim_options[0];
 	mutex_init(&chip->otg_lock);
 	INIT_DELAYED_WORK(&chip->otg_reset_work, smbchg_otg_reset_work);
 	INIT_DELAYED_WORK(&chip->detect_work, smbchg_detect_work);
+	INIT_DELAYED_WORK(&chip->hvdcp_det_work, smbchg_hvdcp_det_work);
+
+	/*
+	 * Needed by smbchg_otg_switch(), which the regulator core may call
+	 * as soon as the OTG regulator below is registered.
+	 */
+	chip->data = of_device_get_match_data(chip->dev);
 
 	/* Initialize OTG regulator */
 	chip->otg_rdesc.id = -1;
@@ -1624,8 +1963,6 @@ static int smbchg_probe(struct platform_device *pdev)
 			chip->otg_reg);
 		return PTR_ERR(chip->otg_reg);
 	}
-
-	chip->data = of_device_get_match_data(chip->dev);
 
 	supply_config.drv_data = chip;
 	supply_config.fwnode = dev_fwnode(&pdev->dev);
@@ -1717,6 +2054,9 @@ static void smbchg_remove(struct platform_device *pdev)
 
 	disable_delayed_work_sync(&chip->otg_reset_work);
 	disable_delayed_work_sync(&chip->detect_work);
+	disable_delayed_work_sync(&chip->hvdcp_det_work);
+	if (chip->data->smbchg_lite)
+		smbchg_hvdcp_restore(chip);
 	if (chip->role_sw) {
 		usb_role_switch_set_role(chip->role_sw, USB_ROLE_NONE);
 		usb_role_switch_put(chip->role_sw);

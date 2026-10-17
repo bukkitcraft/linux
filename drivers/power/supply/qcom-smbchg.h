@@ -82,6 +82,10 @@
 /* CHGR_FCC_CFG bits */
 #define FCC_MASK			GENMASK(4, 0)
 
+/* CHGR_FCC_CMP_CFG bits (JEITA soft zone fast charge current) */
+#define FCC_COMP_MASK			GENMASK(1, 0)
+#define FCC_COMP_700MA			1
+
 /* CHGR_RT_STS bits */
 #define CHG_INHIBIT_BIT			BIT(1)
 #define CHG_COMP_SFT_BIT		BIT(3)
@@ -122,6 +126,9 @@
 #define BAT_MISSING_BIT			BIT(6)
 #define BAT_TERM_MISSING_BIT		BIT(7)
 
+/* OTG_TRIM6 bits */
+#define TR_ENB_SKIP_BIT			BIT(2)
+
 /* USB_CHGPTH_ICL_STS_1 bits */
 #define ICL_STS_MASK			GENMASK(4, 0)
 #define AICL_STS_BIT			BIT(5)
@@ -130,7 +137,22 @@
 /* USB_CHGPTH_CFG bits */
 #define USB51AC_CTRL			BIT(1)
 #define USB51_COMMAND_POL		BIT(2)
+#define HVDCP_EN_BIT			BIT(3)
+#define HVDCP_ADAPTER_SEL_MASK		GENMASK(5, 4)
+#define HVDCP_ADAPTER_SEL_5V		0x00
+#define HVDCP_ADAPTER_SEL_9V		0x10
 #define CFG_USB3P0_SEL_BIT		BIT(7)
+
+/* USB_CHGPTH_USBIN_HVDCP_STS bits (SCHG_LITE layout, PMI8950) */
+#define SCHG_LITE_USBIN_HVDCP_SEL_BIT	BIT(0)
+#define SCHG_LITE_USBIN_HVDCP_SEL_9V_BIT BIT(2)
+
+/* USB_CHGPTH_CMD_HVDCP_1 bits */
+#define FORCE_HVDCP_2P0_BIT		BIT(3)
+
+/* USB_CHGPTH_USBIN_CHGR_CFG bits */
+#define ADAPTER_ALLOWANCE_MASK		GENMASK(2, 0)
+#define USBIN_ADAPTER_5V_9V_CONT	0x2
 
 /* USB_CHGPTH_RT_STS bits */
 #define USBIN_OV_BIT			BIT(1)
@@ -219,6 +241,19 @@
 #define OTG_RESET_DELAY_MS		20
 
 /*
+ * Input current limits per port type, as in the downstream qpnp-smbcharger
+ * driver (DEFAULT_CDP_MA, smbchg_default_dcp_icl_ma,
+ * smbchg_default_hvdcp_icl_ma). AICL may settle lower.
+ */
+#define SMBCHG_CDP_ICL_UA		1500000
+#define SMBCHG_DCP_ICL_UA		1800000
+#define SMBCHG_HVDCP_ICL_UA		3000000
+
+/* HVDCP (Quick Charge 2.0) detection, downstream HVDCP_NOTIFY_MS */
+#define SMBCHG_HVDCP_NOTIFY_MS		2500
+#define SMBCHG_HVDCP_FORCE_MS		500
+
+/*
  * These values can be indexed using a bitmask:
  * 0: USB 2.0/3.0
  * 1: Limited/full current
@@ -255,6 +290,16 @@ struct smbchg_chip {
 	u16 role_sw_timeout;
 	/* prevent races with reset work */
 	struct mutex otg_lock;
+
+	/*
+	 * Last VBUS budget reported by the USB gadget (uA). Applied on an
+	 * SDP only, protected by otg_lock.
+	 */
+	int sdp_ilim_ua;
+
+	/* HVDCP (QC 2.0) detection after a DCP was found, PMI8950 only */
+	struct delayed_work hvdcp_det_work;
+	bool hvdcp_active;
 
 	const struct smbchg_data *data;
 };
