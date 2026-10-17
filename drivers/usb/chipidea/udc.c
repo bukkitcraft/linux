@@ -17,6 +17,8 @@
 #include <linux/slab.h>
 #include <linux/pm_runtime.h>
 #include <linux/pinctrl/consumer.h>
+#include <linux/power_supply.h>
+#include <linux/property.h>
 #include <linux/usb/ch9.h>
 #include <linux/usb/gadget.h>
 #include <linux/usb/otg-fsm.h>
@@ -1936,13 +1938,42 @@ out:
 	return ret;
 }
 
+static void ci_udc_vbus_draw_work(struct work_struct *work)
+{
+	struct ci_hdrc *ci = container_of(work, struct ci_hdrc, vbus_draw_work);
+	union power_supply_propval val;
+	int ret;
+
+	val.intval = 1000 * READ_ONCE(ci->vbus_draw_ma);
+	ret = power_supply_set_property(ci->usb_psy,
+					POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,
+					&val);
+	if (ret < 0)
+		dev_dbg(ci->dev, "failed to set input current limit %d uA: %d\n",
+			val.intval, ret);
+}
+
 static int ci_udc_vbus_draw(struct usb_gadget *_gadget, unsigned ma)
 {
 	struct ci_hdrc *ci = container_of(_gadget, struct ci_hdrc, gadget);
 
 	if (ci->usb_phy)
 		return usb_phy_set_power(ci->usb_phy, ma);
-	return -ENOTSUPP;
+
+	/*
+	 * With a generic PHY nothing forwards the budget negotiated with
+	 * the host to the charger, which then stays at the 100 mA
+	 * unconfigured SDP limit. Hand it to the charger named by
+	 * "usb-psy-name" (same approach as dwc3). Called from atomic
+	 * context, so defer the power supply call.
+	 */
+	if (!ci->usb_psy)
+		return -ENOTSUPP;
+
+	WRITE_ONCE(ci->vbus_draw_ma, ma);
+	schedule_work(&ci->vbus_draw_work);
+
+	return 0;
 }
 
 static int ci_udc_selfpowered(struct usb_gadget *_gadget, int is_on)
@@ -2340,6 +2371,13 @@ void ci_hdrc_gadget_destroy(struct ci_hdrc *ci)
 
 	usb_del_gadget_udc(&ci->gadget);
 
+	if (ci->usb_psy) {
+		/* no more vbus_draw calls after the gadget is gone */
+		cancel_work_sync(&ci->vbus_draw_work);
+		power_supply_put(ci->usb_psy);
+		ci->usb_psy = NULL;
+	}
+
 	destroy_eps(ci);
 
 	dma_pool_destroy(ci->td_pool);
@@ -2420,14 +2458,25 @@ static void udc_resume(struct ci_hdrc *ci, bool power_lost)
 int ci_hdrc_gadget_init(struct ci_hdrc *ci)
 {
 	struct ci_role_driver *rdrv;
+	const char *usb_psy_name;
 	int ret;
 
 	if (!hw_read(ci, CAP_DCCPARAMS, DCCPARAMS_DC))
 		return -ENXIO;
 
+	if (!device_property_read_string(ci->dev->parent, "usb-psy-name",
+					 &usb_psy_name)) {
+		ci->usb_psy = power_supply_get_by_name(usb_psy_name);
+		if (!ci->usb_psy)
+			return -EPROBE_DEFER;
+		INIT_WORK(&ci->vbus_draw_work, ci_udc_vbus_draw_work);
+	}
+
 	rdrv = devm_kzalloc(ci->dev, sizeof(*rdrv), GFP_KERNEL);
-	if (!rdrv)
-		return -ENOMEM;
+	if (!rdrv) {
+		ret = -ENOMEM;
+		goto put_psy;
+	}
 
 	rdrv->start	= udc_id_switch_for_device;
 	rdrv->stop	= udc_id_switch_for_host;
@@ -2439,8 +2488,17 @@ int ci_hdrc_gadget_init(struct ci_hdrc *ci)
 	rdrv->name	= "gadget";
 
 	ret = udc_start(ci);
-	if (!ret)
-		ci->roles[CI_ROLE_GADGET] = rdrv;
+	if (ret)
+		goto put_psy;
 
+	ci->roles[CI_ROLE_GADGET] = rdrv;
+
+	return 0;
+
+put_psy:
+	if (ci->usb_psy) {
+		power_supply_put(ci->usb_psy);
+		ci->usb_psy = NULL;
+	}
 	return ret;
 }

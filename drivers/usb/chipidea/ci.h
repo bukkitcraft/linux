@@ -256,6 +256,10 @@ struct ci_hdrc {
 	struct phy			*phy;
 	/* old usb_phy interface */
 	struct usb_phy			*usb_phy;
+	/* charger to tell about the negotiated VBUS budget (generic PHY case) */
+	struct power_supply		*usb_psy;
+	struct work_struct		vbus_draw_work;
+	unsigned int			vbus_draw_ma;
 	struct usb_hcd			*hcd;
 	bool				id_event;
 	bool				b_sess_valid_event;
