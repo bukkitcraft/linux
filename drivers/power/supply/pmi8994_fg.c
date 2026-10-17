@@ -34,10 +34,20 @@
 #define BATT_TEMP			0x550
 #define BATT_VOLTAGE_CURRENT		0x5cc
 
-#define BATT_TEMP_JEITA_COLD		100
-#define BATT_TEMP_JEITA_COOL		50
-#define BATT_TEMP_JEITA_WARM		400
-#define BATT_TEMP_JEITA_HOT		450
+/*
+ * JEITA thresholds in decidegree Celsius, same as the downstream qpnp-fg
+ * driver and the GM 5 Plus (shamrock) stock DT:
+ *   qcom,cool-bat-decidegc = 0     -> SOFT_COLD, SRAM 0x454 byte 0
+ *   qcom,warm-bat-decidegc = 450   -> SOFT_HOT,  SRAM 0x454 byte 1
+ *   qcom,cold-bat-decidegc = -100  -> HARD_COLD, SRAM 0x454 byte 2
+ *   qcom,hot-bat-decidegc  = 550   -> HARD_HOT,  SRAM 0x454 byte 3
+ * Soft limits reduce the charge current (charger FCC compensation), hard
+ * limits stop charging.
+ */
+#define BATT_TEMP_JEITA_SOFT_COLD	0
+#define BATT_TEMP_JEITA_SOFT_HOT	450
+#define BATT_TEMP_JEITA_HARD_COLD	(-100)
+#define BATT_TEMP_JEITA_HARD_HOT	550
 
 #define MEM_INTF_AVAIL			BIT(0)
 #define MEM_INTF_CTL_BURST		BIT(7)
@@ -1020,40 +1030,44 @@ static int pmi8994_fg_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	/* Set default temperature thresholds */
+	/*
+	 * Set default temperature thresholds. SRAM byte order (offset 0..3)
+	 * is SOFT_COLD, SOFT_HOT, HARD_COLD, HARD_HOT, mapped to the
+	 * TEMP_MIN, TEMP_MAX, TEMP_ALERT_MIN, TEMP_ALERT_MAX properties.
+	 */
 	ret = pmi8994_fg_set_temp_threshold(chip,
 					    POWER_SUPPLY_PROP_TEMP_MIN,
-					    BATT_TEMP_JEITA_COLD);
+					    BATT_TEMP_JEITA_SOFT_COLD);
 	if (ret) {
 		dev_err(chip->dev,
-			"Failed to set cold threshold: %d\n", ret);
+			"Failed to set soft cold threshold: %d\n", ret);
 		return ret;
 	}
 
 	ret = pmi8994_fg_set_temp_threshold(chip,
 					    POWER_SUPPLY_PROP_TEMP_MAX,
-					    BATT_TEMP_JEITA_WARM);
+					    BATT_TEMP_JEITA_SOFT_HOT);
 	if (ret) {
 		dev_err(chip->dev,
-			"Failed to set warm threshold: %d\n", ret);
+			"Failed to set soft hot threshold: %d\n", ret);
 		return ret;
 	}
 
 	ret = pmi8994_fg_set_temp_threshold(chip,
 					    POWER_SUPPLY_PROP_TEMP_ALERT_MIN,
-					    BATT_TEMP_JEITA_COOL);
+					    BATT_TEMP_JEITA_HARD_COLD);
 	if (ret) {
 		dev_err(chip->dev,
-			"Failed to set cool threshold: %d\n", ret);
+			"Failed to set hard cold threshold: %d\n", ret);
 		return ret;
 	}
 
 	ret = pmi8994_fg_set_temp_threshold(chip,
 					    POWER_SUPPLY_PROP_TEMP_ALERT_MAX,
-					    BATT_TEMP_JEITA_HOT);
+					    BATT_TEMP_JEITA_HARD_HOT);
 	if (ret) {
 		dev_err(chip->dev,
-			"Failed to set hot threshold: %d\n", ret);
+			"Failed to set hard hot threshold: %d\n", ret);
 		return ret;
 	}
 
