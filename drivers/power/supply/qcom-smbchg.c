@@ -113,6 +113,22 @@ static int smbchg_usb_enable(struct smbchg_chip *chip, bool enable)
 }
 
 /**
+ * @brief smbchg_usb_type_has_data() - Check whether a port carries USB data
+ *
+ * @param type Port type from smbchg_usb_get_type()
+ * @return false for a dedicated charging port, true otherwise
+ *
+ * @details: Dedicated and proprietary chargers (reported as DCP) short or
+ * bias D+/D-, so the USB peripheral must stay off on them (downstream
+ * OTG_STATE_B_CHARGER). An undetermined type keeps the peripheral on so
+ * a data port is never lost.
+ */
+static bool smbchg_usb_type_has_data(enum power_supply_usb_type type)
+{
+	return type != POWER_SUPPLY_USB_TYPE_DCP;
+}
+
+/**
  * @brief smbchg_usb_get_type() - Get USB port type
  *
  * @param chip Pointer to smbchg_chip
@@ -891,7 +907,17 @@ static void smbchg_extcon_update(struct smbchg_chip *chip,
 	enum power_supply_usb_type usb_type = smbchg_usb_get_type(chip);
 	int otg_vbus_present = smbchg_otg_is_enabled(chip->otg_reg);
 
-	extcon_set_state(chip->edev, EXTCON_USB, usb_present);
+	/*
+	 * Only start the USB peripheral on ports that carry data. A DCP
+	 * (or an "other"/proprietary charger) has D+ and D- shorted; the
+	 * gadget's D+ pull-up would then fight the 0.6 V the charger
+	 * drives on D+ for the QC 2.0 handshake, so an HVDCP is never
+	 * detected. Downstream msm_otg does the same: a DCP moves the
+	 * state machine to OTG_STATE_B_CHARGER without starting the
+	 * peripheral.
+	 */
+	extcon_set_state(chip->edev, EXTCON_USB,
+			 usb_present && smbchg_usb_type_has_data(usb_type));
 	extcon_set_state(chip->edev, EXTCON_USB_HOST, otg_present);
 	extcon_set_property(chip->edev, EXTCON_USB_HOST, EXTCON_PROP_USB_VBUS,
 			    (union extcon_property_value)otg_vbus_present);
@@ -1235,7 +1261,7 @@ static void smbchg_detect_work(struct work_struct *work)
 	if (otg_present) {
 		usb_role = USB_ROLE_HOST;
 		smbchg_otg_switch(chip, !usb_present);
-	} else if (usb_present) {
+	} else if (usb_present && smbchg_usb_type_has_data(usb_type)) {
 		usb_role = USB_ROLE_DEVICE;
 	}
 
