@@ -1780,7 +1780,9 @@ static int smbchg_init(struct smbchg_chip *chip)
 
 	/*
 	 * Charger configuration, part 2:
-	 * - Enable charger inhibition
+	 * - Disable charger inhibition, as downstream does when
+	 *   qcom,chg-inhibit-en is absent (PMI8950 boards such as the
+	 *   GM 5 Plus); recharge is handled by the FG based auto-recharge
 	 * - Enable automatic recharge
 	 * - Enable current termination
 	 * - Set pre to fast charging transition to automatic
@@ -1790,7 +1792,8 @@ static int smbchg_init(struct smbchg_chip *chip)
 		chip->regmap, chip->base + SMBCHG_CHGR_CHGR_CFG2,
 		CHARGER_INHIBIT_BIT | AUTO_RECHG_BIT | I_TERM_BIT |
 			P2F_CHG_TRAN_BIT | CHG_EN_SRC_BIT,
-		CHG_INHIBIT_EN | AUTO_RCHG_EN | CURRENT_TERM_EN |
+		(chip->data->smbchg_lite ? CHG_INHIBIT_DIS : CHG_INHIBIT_EN) |
+			AUTO_RCHG_EN | CURRENT_TERM_EN |
 			PRE_FAST_AUTO | CHG_EN_SRC_CMD);
 	if (ret)
 		return ret;
