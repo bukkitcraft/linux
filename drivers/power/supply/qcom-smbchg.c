@@ -1356,6 +1356,33 @@ static irqreturn_t smbchg_handle_usb_source_detect(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
+/*
+ * Downstream usbin_ov_handler(): report the over-voltage and, once it
+ * clears, handle the input again as a new insertion. While USBIN_OV is
+ * set smbchg_usb_is_present() already reports no input.
+ */
+static irqreturn_t smbchg_handle_usbin_ov(int irq, void *data)
+{
+	struct smbchg_chip *chip = data;
+	u32 value;
+	int ret;
+
+	ret = regmap_read(chip->regmap, chip->base + SMBCHG_USB_CHGPTH_RT_STS,
+			  &value);
+	if (ret)
+		return IRQ_HANDLED;
+
+	if (value & USBIN_OV_BIT)
+		dev_warn(chip->dev, "USB input over-voltage\n");
+	else
+		dev_info(chip->dev, "USB input over-voltage cleared\n");
+
+	schedule_delayed_work(&chip->detect_work, msecs_to_jiffies(20));
+	power_supply_changed(chip->usb_psy);
+
+	return IRQ_HANDLED;
+}
+
 static irqreturn_t smbchg_handle_usbid_change(int irq, void *data)
 {
 	struct smbchg_chip *chip = data;
@@ -1455,28 +1482,28 @@ static irqreturn_t smbchg_handle_temp_shutdown(int irq, void *data)
 }
 
 const struct smbchg_irq smbchg_irqs[] = {
-	{ "chg-error", smbchg_handle_charger_error },
+	{ "chg-error", smbchg_handle_charger_error, true },
 	{ "chg-inhibit", NULL },
 	{ "chg-prechg-sft", NULL },
 	{ "chg-complete-chg-sft", NULL },
-	{ "chg-p2f-thr", smbchg_handle_p2f },
+	{ "chg-p2f-thr", smbchg_handle_p2f, true },
 	{ "chg-rechg-thr", smbchg_handle_rechg },
 	{ "chg-taper-thr", smbchg_handle_taper },
-	{ "chg-tcc-thr", smbchg_handle_tcc },
-	{ "batt-hot", smbchg_handle_batt_temp },
-	{ "batt-warm", smbchg_handle_batt_temp },
-	{ "batt-cold", smbchg_handle_batt_temp },
-	{ "batt-cool", smbchg_handle_batt_temp },
+	{ "chg-tcc-thr", smbchg_handle_tcc, true },
+	{ "batt-hot", smbchg_handle_batt_temp, true },
+	{ "batt-warm", smbchg_handle_batt_temp, true },
+	{ "batt-cold", smbchg_handle_batt_temp, true },
+	{ "batt-cool", smbchg_handle_batt_temp, true },
 	{ "batt-ov", NULL },
 	{ "batt-low", NULL },
-	{ "batt-missing", smbchg_handle_batt_presence },
+	{ "batt-missing", smbchg_handle_batt_presence, true },
 	{ "batt-term-missing", NULL },
 	{ "usbin-uv", NULL },
-	{ "usbin-ov", NULL },
-	{ "usbin-src-det", smbchg_handle_usb_source_detect },
-	{ "usbid-change", smbchg_handle_usbid_change },
-	{ "otg-fail", smbchg_handle_otg_fail },
-	{ "otg-oc", smbchg_handle_otg_oc },
+	{ "usbin-ov", smbchg_handle_usbin_ov, true },
+	{ "usbin-src-det", smbchg_handle_usb_source_detect, true },
+	{ "usbid-change", smbchg_handle_usbid_change, true },
+	{ "otg-fail", smbchg_handle_otg_fail, true },
+	{ "otg-oc", smbchg_handle_otg_oc, true },
 	{ "aicl-done", smbchg_handle_aicl_done },
 	{ "dcin-uv", NULL },
 	{ "dcin-ov", NULL },
@@ -2069,7 +2096,22 @@ static int smbchg_probe(struct platform_device *pdev)
 				smbchg_irqs[i].name, ERR_PTR(irq));
 			return ret;
 		}
+
+		/*
+		 * Downstream enable_irq_wake() set: plugging or pulling a
+		 * charger, battery temperature zones and charger errors
+		 * wake the system so limits are applied right away. Armed
+		 * in system suspend, see smbchg_system_suspend().
+		 */
+		if (smbchg_irqs[i].wake && chip->num_wake_irqs <
+		    ARRAY_SIZE(chip->wake_irqs))
+			chip->wake_irqs[chip->num_wake_irqs++] = irq;
 	}
+
+	ret = devm_device_init_wakeup(chip->dev);
+	if (ret)
+		dev_warn(chip->dev, "Failed to init wakeup: %pe\n",
+			 ERR_PTR(ret));
 
 	platform_set_drvdata(pdev, chip);
 
@@ -2099,6 +2141,12 @@ static void smbchg_remove(struct platform_device *pdev)
 static int smbchg_system_suspend(struct device *dev)
 {
 	struct smbchg_chip *chip = dev_get_drvdata(dev);
+	int i;
+
+	chip->wake_armed = device_may_wakeup(dev);
+	if (chip->wake_armed)
+		for (i = 0; i < chip->num_wake_irqs; i++)
+			enable_irq_wake(chip->wake_irqs[i]);
 
 	if (!chip->role_sw)
 		return 0;
@@ -2112,6 +2160,12 @@ static int smbchg_system_suspend(struct device *dev)
 static int smbchg_system_resume(struct device *dev)
 {
 	struct smbchg_chip *chip = dev_get_drvdata(dev);
+	int i;
+
+	if (chip->wake_armed)
+		for (i = 0; i < chip->num_wake_irqs; i++)
+			disable_irq_wake(chip->wake_irqs[i]);
+	chip->wake_armed = false;
 
 	schedule_delayed_work(&chip->detect_work, msecs_to_jiffies(0));
 

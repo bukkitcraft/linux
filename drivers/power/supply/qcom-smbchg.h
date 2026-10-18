@@ -301,12 +301,18 @@ struct smbchg_chip {
 	struct delayed_work hvdcp_det_work;
 	bool hvdcp_active;
 
+	/* Downstream enable_irq_wake() interrupts, armed in system suspend */
+	int wake_irqs[16];
+	int num_wake_irqs;
+	bool wake_armed;
+
 	const struct smbchg_data *data;
 };
 
 struct smbchg_irq {
 	const char *name;
 	irq_handler_t handler;
+	bool wake;
 };
 
 struct smbchg_data {
