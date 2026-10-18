@@ -435,7 +435,18 @@ static int pmi8994_fg_get_capacity(struct pmi8994_fg_chip *chip, int *val)
 	if (cap[0] != cap[1])
 		cap[0] = cap[0] < cap[1] ? cap[0] : cap[1];
 
-	*val = DIV_ROUND_CLOSEST((cap[0] - 1) * 98, 0xff - 2) + 1;
+	/*
+	 * Same mapping as downstream qpnp-fg get_prop_capacity(): raw 0 is
+	 * empty (0%), raw 0xff is full (100%), everything in between maps to
+	 * 1..99%. The previous formula reported 1% for an empty and 99% for
+	 * a full battery.
+	 */
+	if (cap[0] == 0)
+		*val = 0;
+	else if (cap[0] == 0xff)
+		*val = 100;
+	else
+		*val = DIV_ROUND_CLOSEST((cap[0] - 1) * 98, 0xff - 2) + 1;
 
 	return 0;
 }
@@ -634,9 +645,19 @@ static int pmi8994_fg_get_property(struct power_supply *psy,
 
 	switch (psp) {
 	case POWER_SUPPLY_PROP_STATUS:
-		/* Get status from charger if available */
-		if (chip->chg_psy && chip->status != POWER_SUPPLY_STATUS_UNKNOWN) {
-			val->intval = chip->status;
+		/*
+		 * Get status from the charger if available. Query it live
+		 * instead of using the value cached by the notifier: the
+		 * charger only sends power_supply_changed() on interrupts, and
+		 * the cache keeps a stale state (e.g. DISCHARGING sampled
+		 * before charging started after plug-in) until the next one.
+		 * Downstream qpnp-fg also asks the charger on every read.
+		 */
+		if (chip->chg_psy &&
+		    !power_supply_get_property(chip->chg_psy,
+					       POWER_SUPPLY_PROP_STATUS, val) &&
+		    val->intval != POWER_SUPPLY_STATUS_UNKNOWN) {
+			chip->status = val->intval;
 		} else {
 			/*
 			 * Fall back to capacity and current-based
@@ -657,9 +678,10 @@ static int pmi8994_fg_get_property(struct power_supply *psy,
 				val->intval = POWER_SUPPLY_STATUS_UNKNOWN;
 				break;
 			}
-			if (temp < 0)
+			/* current_now is positive while charging (see ABI) */
+			if (temp > 0)
 				val->intval = POWER_SUPPLY_STATUS_CHARGING;
-			else if (temp > 0)
+			else if (temp < 0)
 				val->intval = POWER_SUPPLY_STATUS_DISCHARGING;
 			else
 				val->intval = POWER_SUPPLY_STATUS_NOT_CHARGING;
@@ -667,7 +689,10 @@ static int pmi8994_fg_get_property(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_HEALTH:
 		/* Get property from charger */
-		ret = power_supply_get_property(chip->chg_psy, psp, val);
+		if (chip->chg_psy)
+			ret = power_supply_get_property(chip->chg_psy, psp, val);
+		else
+			val->intval = POWER_SUPPLY_HEALTH_UNKNOWN;
 		break;
 	case POWER_SUPPLY_PROP_TECHNOLOGY:
 		val->intval = POWER_SUPPLY_TECHNOLOGY_LION;
@@ -853,24 +878,20 @@ static int pmi8994_fg_notifier_call(struct notifier_block *nb, unsigned long val
 		ret = power_supply_get_property(psy, POWER_SUPPLY_PROP_STATUS, &propval);
 		if (ret)
 			chip->status = POWER_SUPPLY_STATUS_UNKNOWN;
-
-		chip->status = propval.intval;
+		else
+			chip->status = propval.intval;
 
 		power_supply_changed(chip->batt_psy);
 
-		if (chip->status == POWER_SUPPLY_STATUS_UNKNOWN) {
-			/*
-			 * REVISIT: Find better solution or remove current-based
-			 * status checking once checking is properly implemented
-			 * in charger drivers
-
-			 * Sometimes it take a while for current to stabilize,
-			 * so signal property change again later to make sure
-			 * current-based status is properly detected.
-			 */
-			cancel_delayed_work_sync(&chip->status_changed_work);
-			schedule_delayed_work(&chip->status_changed_work, msecs_to_jiffies(1000));
-		}
+		/*
+		 * The charger state machine needs a moment after an input
+		 * change (plug-in, AICL, termination) before CHGR_STS shows
+		 * the final charge type, so signal a property change again
+		 * one second later. Userspace (UPower) re-reads the status on
+		 * that uevent instead of keeping the transient one.
+		 */
+		cancel_delayed_work(&chip->status_changed_work);
+		schedule_delayed_work(&chip->status_changed_work, msecs_to_jiffies(1000));
 	}
 
 	return NOTIFY_OK;
@@ -907,6 +928,19 @@ static void pmi8994_fg_cleanup(void *data)
 	disable_delayed_work_sync(&chip->sram_release_access_work);
 	disable_delayed_work_sync(&chip->status_changed_work);
 	destroy_workqueue(chip->sram_wq);
+}
+
+static void pmi8994_fg_unreg_notifier(void *data)
+{
+	struct pmi8994_fg_chip *chip = data;
+
+	/*
+	 * Runs before batt_psy is unregistered (devm actions are undone in
+	 * reverse order): stop charger notifications first, then make sure no
+	 * delayed power_supply_changed(batt_psy) is still pending.
+	 */
+	power_supply_unreg_notifier(&chip->nb);
+	disable_delayed_work_sync(&chip->status_changed_work);
 }
 
 static int pmi8994_fg_probe(struct platform_device *pdev)
@@ -1094,6 +1128,11 @@ static int pmi8994_fg_probe(struct platform_device *pdev)
 				"Failed to register notifier: %d\n", ret);
 			return ret;
 		}
+
+		ret = devm_add_action_or_reset(chip->dev,
+					       pmi8994_fg_unreg_notifier, chip);
+		if (ret)
+			return ret;
 	}
 
 	return 0;
