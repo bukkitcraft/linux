@@ -1808,6 +1808,52 @@ static const struct power_supply_desc smbchg_usb_psy_desc = {
 };
 
 /**
+ * @brief smbchg_batt_ov_wa() - Do not latch charging off on battery OV
+ *
+ * @param chip Pointer to smbchg_chip
+ * @return 0 on success, -errno on failure
+ *
+ * @details: Downstream batt_ov_wa_check() (SMBCHG_BATT_OV_WA, PMI8994 and
+ * PMI8950). With CHG_BAT_OV_ECC set, a short battery over-voltage
+ * reading near the float voltage latches charging off until the input
+ * is replugged: CHGR_STS shows 0xa1 and BAT_IF_RT_STS BAT_OV, with no
+ * charging current although the battery is not full. The float voltage
+ * regulation still applies. If the latch is already set (for example
+ * left by an earlier boot), toggle charging to clear it.
+ */
+static int smbchg_batt_ov_wa(struct smbchg_chip *chip)
+{
+	u32 value;
+	int ret;
+
+	ret = qcom_pmic_sec_masked_write(chip->regmap,
+					 chip->base + SMBCHG_CHGR_CHGR_CFG2,
+					 CHG_BAT_OV_ECC_BIT, 0);
+	if (ret) {
+		dev_err(chip->dev, "Failed to disable battery OV latch: %pe\n",
+			ERR_PTR(ret));
+		return ret;
+	}
+
+	ret = regmap_read(chip->regmap, chip->base + SMBCHG_BAT_IF_RT_STS,
+			  &value);
+	if (ret)
+		return ret;
+
+	if (!(value & BAT_OV_BIT))
+		return 0;
+
+	ret = smbchg_charging_enable(chip, false);
+	if (ret)
+		return ret;
+
+	/* delay for charging-disable to take effect, as downstream */
+	msleep(200);
+
+	return smbchg_charging_enable(chip, true);
+}
+
+/**
  * @brief smbchg_init() - Main initialization routine
  *
  * @param chip Pointer to smbchg_chip
@@ -1950,6 +1996,12 @@ static int smbchg_init(struct smbchg_chip *chip)
 		dev_err(chip->dev, "Failed to enable AICL rerun: %pe\n",
 			ERR_PTR(ret));
 		return ret;
+	}
+
+	if (chip->data->batt_ov_wa) {
+		ret = smbchg_batt_ov_wa(chip);
+		if (ret)
+			return ret;
 	}
 
 	/*

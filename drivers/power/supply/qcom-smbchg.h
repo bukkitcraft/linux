@@ -106,6 +106,7 @@
 #define AUTO_RECHG_BIT			BIT(2)
 #define I_TERM_BIT			BIT(3)
 #define P2F_CHG_TRAN_BIT		BIT(5)
+#define CHG_BAT_OV_ECC_BIT		BIT(4)
 #define CHG_EN_POLARITY_BIT		BIT(6)
 #define CHG_EN_SRC_BIT			BIT(7)
 
@@ -323,6 +324,8 @@ struct smbchg_data {
 
 	bool reset_otg_on_oc;
 	bool smbchg_lite;
+	/* Downstream SMBCHG_BATT_OV_WA (PMI8994, PMI8950) */
+	bool batt_ov_wa;
 };
 
 static const int smbchg_fv_table[] = {
@@ -474,7 +477,8 @@ static const struct smbchg_data smbchg_pmi8950_data = {
 	.ilim_table_len = ARRAY_SIZE(smbchg_ilim_table_pmi8994),
 
 	.reset_otg_on_oc = true,
-	.smbchg_lite = true
+	.smbchg_lite = true,
+	.batt_ov_wa = true
 };
 
 static const struct smbchg_data smbchg_pmi8994_data = {
@@ -483,7 +487,8 @@ static const struct smbchg_data smbchg_pmi8994_data = {
 	.ilim_table = smbchg_ilim_table_pmi8994,
 	.ilim_table_len = ARRAY_SIZE(smbchg_ilim_table_pmi8994),
 
-	.reset_otg_on_oc = true
+	.reset_otg_on_oc = true,
+	.batt_ov_wa = true
 };
 
 static const struct smbchg_data smbchg_pmi8996_data = {
