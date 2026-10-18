@@ -336,15 +336,27 @@
 };
 
 &usb {
-	extcon = <&usb_vbus>, <0>;
+	/*
+	 * VBUS and ID come from the PMI8950 charger (extcon provider), like
+	 * downstream where qcom,hsusb-otg gets them from the smbcharger and
+	 * like other PMI8950 boards (msm8917-lenovo-tbx304x). The previous
+	 * extcon-usb-dummy never reported unplug, so the controller never
+	 * reset on re-plug and OTG could not be detected.
+	 */
+	extcon = <&pmi8950_smbcharger>, <&pmi8950_smbcharger>;
 	vbus-supply = <&otg_vbus>;
-	dr_mode = "peripheral";
+	dr_mode = "otg";
+	/*
+	 * Forward the negotiated SDP budget (100/500 mA) to the PMI8950
+	 * charger, like downstream msm_otg_set_power() does.
+	 */
+	usb-psy-name = "qcom-smbchg-usb";
 
 	status = "okay";
 };
 
 &usb_hs_phy_8916 {
-	extcon = <&usb_vbus>;
+	extcon = <&pmi8950_smbcharger>;
 
 //	vdd-supply = <&pm8950_l2>;
 	v1p8-supply = <&pm8950_l7>;
