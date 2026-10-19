@@ -355,9 +355,16 @@ int wcn36xx_rx_skb(struct wcn36xx *wcn, struct sk_buff *skb)
 	status.antenna = 1;
 	status.flag = 0;
 	status.rx_flags = 0;
-	status.flag |= RX_FLAG_IV_STRIPPED |
-		       RX_FLAG_MMIC_STRIPPED |
-		       RX_FLAG_DECRYPTED;
+	/*
+	 * The DPU decrypts data frames only. Protected (802.11w robust)
+	 * management frames reach the host still encrypted, so leave
+	 * them to mac80211 for software CCMP/BIP handling.
+	 */
+	if (!(ieee80211_is_mgmt(hdr->frame_control) &&
+	      ieee80211_has_protected(hdr->frame_control)))
+		status.flag |= RX_FLAG_IV_STRIPPED |
+			       RX_FLAG_MMIC_STRIPPED |
+			       RX_FLAG_DECRYPTED;
 
 	wcn36xx_dbg(WCN36XX_DBG_RX, "status.flags=%x\n", status.flag);
 

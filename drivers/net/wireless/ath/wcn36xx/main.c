@@ -535,10 +535,25 @@ static int wcn36xx_set_key(struct ieee80211_hw *hw, enum set_key_cmd cmd,
 		break;
 	case WLAN_CIPHER_SUITE_CCMP:
 		vif_priv->encrypt_type = WCN36XX_HAL_ED_CCMP;
+		/*
+		 * Robust management frames are sent through the
+		 * management path with DPU encryption disabled, so let
+		 * mac80211 protect them in software (802.11w).
+		 */
+		if (cmd == SET_KEY)
+			key_conf->flags |= IEEE80211_KEY_FLAG_SW_MGMT_TX;
 		break;
 	case WLAN_CIPHER_SUITE_TKIP:
 		vif_priv->encrypt_type = WCN36XX_HAL_ED_TKIP;
 		break;
+	case WLAN_CIPHER_SUITE_AES_CMAC:
+		/*
+		 * BIP (IGTK) is not offloaded: mac80211 adds and checks
+		 * the MMIE in software. Do not touch encrypt_type, which
+		 * belongs to the data keys.
+		 */
+		ret = -EOPNOTSUPP;
+		goto out;
 	default:
 		wcn36xx_err("Unsupported key type 0x%x\n",
 			      key_conf->cipher);
@@ -1431,6 +1446,8 @@ static int wcn36xx_init_ieee80211(struct wcn36xx *wcn)
 		WLAN_CIPHER_SUITE_WEP104,
 		WLAN_CIPHER_SUITE_TKIP,
 		WLAN_CIPHER_SUITE_CCMP,
+		/* BIP, handled by mac80211 in software */
+		WLAN_CIPHER_SUITE_AES_CMAC,
 	};
 
 	ieee80211_hw_set(wcn->hw, TIMING_BEACON_ONLY);
@@ -1440,6 +1457,7 @@ static int wcn36xx_init_ieee80211(struct wcn36xx *wcn)
 	ieee80211_hw_set(wcn->hw, HAS_RATE_CONTROL);
 	ieee80211_hw_set(wcn->hw, SINGLE_SCAN_ON_ALL_BANDS);
 	ieee80211_hw_set(wcn->hw, REPORTS_TX_ACK_STATUS);
+	ieee80211_hw_set(wcn->hw, MFP_CAPABLE);
 
 	wcn->hw->wiphy->interface_modes = BIT(NL80211_IFTYPE_STATION) |
 		BIT(NL80211_IFTYPE_AP) |
