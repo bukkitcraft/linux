@@ -390,14 +390,6 @@
 	status = "okay";
 };
 
-&bam_dmux_dma {
-	status = "okay";
-};
-
-&bam_dmux {
-	status = "okay";
-};
-
 &modem {
 	mss-supply = <&pm8950_s1>;
 	pll-supply = <&pm8950_l7>;
@@ -410,7 +402,13 @@
 };
 
 &ipa {
-	status = "disabled";
+	/*
+	 * Mobile data goes through IPA 2.6L, as downstream (qcom,ipa with
+	 * qcom,ipa-hw-ver = <6> and qcom,rmnet-ipa). The modem firmware on
+	 * this board has no BAM-DMUX channel: its SMSM power-control bits
+	 * never toggle, so ModemManager found no network port.
+	 */
+	status = "okay";
 };
 
 &pmi8950_haptics {
