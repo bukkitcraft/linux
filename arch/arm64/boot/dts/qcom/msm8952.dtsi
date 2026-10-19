@@ -47,6 +47,7 @@
 			reg = <0x0>;
 			device_type = "cpu";
 			enable-method = "psci";
+			cpu-idle-states = <&little_cpu_sleep_0>;
 			operating-points-v2 = <&cpu_opp_table_c0>;
 			next-level-cache = <&l2_0>;
 			qcom,acc = <&acc0>;
@@ -66,6 +67,7 @@
 			reg = <0x1>;
 			device_type = "cpu";
 			enable-method = "psci";
+			cpu-idle-states = <&little_cpu_sleep_0>;
 			operating-points-v2 = <&cpu_opp_table_c0>;
 			next-level-cache = <&l2_0>;
 			qcom,acc = <&acc1>;
@@ -78,6 +80,7 @@
 			reg = <0x2>;
 			device_type = "cpu";
 			enable-method = "psci";
+			cpu-idle-states = <&little_cpu_sleep_0>;
 			operating-points-v2 = <&cpu_opp_table_c0>;
 			next-level-cache = <&l2_0>;
 			qcom,acc = <&acc2>;
@@ -90,6 +93,7 @@
 			reg = <0x3>;
 			device_type = "cpu";
 			enable-method = "psci";
+			cpu-idle-states = <&little_cpu_sleep_0>;
 			operating-points-v2 = <&cpu_opp_table_c0>;
 			next-level-cache = <&l2_0>;
 			qcom,acc = <&acc3>;
@@ -104,6 +108,7 @@
 			next-level-cache = <&l2_1>;
 			qcom,acc = <&acc4>;
 			enable-method = "psci";
+			cpu-idle-states = <&big_cpu_sleep_0>;
 			operating-points-v2 = <&cpu_opp_table_c1>;
 			clocks = <&apcs1>;
 			#cooling-cells = <2>;
@@ -123,6 +128,7 @@
 			next-level-cache = <&l2_1>;
 			qcom,acc = <&acc5>;
 			enable-method = "psci";
+			cpu-idle-states = <&big_cpu_sleep_0>;
 			operating-points-v2 = <&cpu_opp_table_c1>;
 			clocks = <&apcs1>;
 			#cooling-cells = <2>;
@@ -135,6 +141,7 @@
 			next-level-cache = <&l2_1>;
 			qcom,acc = <&acc6>;
 			enable-method = "psci";
+			cpu-idle-states = <&big_cpu_sleep_0>;
 			operating-points-v2 = <&cpu_opp_table_c1>;
 			clocks = <&apcs1>;
 			#cooling-cells = <2>;
@@ -147,9 +154,43 @@
 			next-level-cache = <&l2_1>;
 			qcom,acc = <&acc7>;
 			enable-method = "psci";
+			cpu-idle-states = <&big_cpu_sleep_0>;
 			operating-points-v2 = <&cpu_opp_table_c1>;
 			clocks = <&apcs1>;
 			#cooling-cells = <2>;
+		};
+
+		/*
+		 * CPU standalone power collapse, from the downstream
+		 * qcom,lpm-levels: qcom,psci-cpu-mode = <2> with qcom,is-reset
+		 * and qcom,use-broadcast-timer, so the PSCI suspend parameter
+		 * is (1 << 30) | 2. Latencies are the downstream
+		 * qcom,latency-us of each cluster (190 us little, 221 us big),
+		 * split evenly between entry and exit. Cluster (L2) and CCI
+		 * low power modes are left out.
+		 */
+		idle-states {
+			entry-method = "psci";
+
+			little_cpu_sleep_0: cpu-sleep-0-0 {
+				compatible = "arm,idle-state";
+				idle-state-name = "little-power-collapse";
+				arm,psci-suspend-param = <0x40000002>;
+				entry-latency-us = <95>;
+				exit-latency-us = <95>;
+				min-residency-us = <1000>;
+				local-timer-stop;
+			};
+
+			big_cpu_sleep_0: cpu-sleep-1-0 {
+				compatible = "arm,idle-state";
+				idle-state-name = "big-power-collapse";
+				arm,psci-suspend-param = <0x40000002>;
+				entry-latency-us = <110>;
+				exit-latency-us = <111>;
+				min-residency-us = <1000>;
+				local-timer-stop;
+			};
 		};
 
 		cpu-map {
