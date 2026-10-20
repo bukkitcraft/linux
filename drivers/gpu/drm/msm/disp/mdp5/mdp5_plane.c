@@ -176,6 +176,22 @@ static int mdp5_plane_atomic_check_with_state(struct drm_crtc_state *crtc_state,
 	DBG("%s: check (%d -> %d)", plane->name,
 			plane_enabled(old_state), plane_enabled(state));
 
+	/*
+	 * A committed plane state without a hwpipe can only be followed by
+	 * a new state without one, unless the new state was duplicated at
+	 * some earlier point, e.g. the state saved by
+	 * drm_atomic_helper_suspend() and committed again on resume. The
+	 * hwpipes of such a state were released from the global state when
+	 * the planes got disabled for suspend, so they are no longer owned
+	 * by this plane: drop them and allocate again below. Keeping them
+	 * left hwpipe_to_plane[] empty while the pipe was in use, and the
+	 * next suspend then failed in mdp5_pipe_release() with -EINVAL.
+	 */
+	if (!to_mdp5_plane_state(old_state)->hwpipe) {
+		mdp5_state->hwpipe = NULL;
+		mdp5_state->r_hwpipe = NULL;
+	}
+
 	max_width = config->hw->lm.max_width << 16;
 	max_height = config->hw->lm.max_height << 16;
 
