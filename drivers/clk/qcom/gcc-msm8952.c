@@ -77,16 +77,25 @@ static const struct pll_vco gpll3_p_vco[] = {
 	{ 700000000, 1400000000, 0 },
 };
 
+/*
+ * GPLL3 at 1100 MHz like downstream (clock-gcc-8936.c, also used for
+ * MSM8952: "GPLL3 at 1100 MHz, main output enabled"), so that the GPU
+ * gets 550 MHz from GPLL3/2. The previous L value with a /2 post divider
+ * gave 700 MHz to gfx3d whenever 465-550 MHz were requested.
+ */
 static const struct alpha_pll_config gpll3_early_config = {
-	.l = 63,
+	/* 19.2 MHz * (57 + 0x4aaaaaaaab / 2^40) = 1100 MHz */
+	.l = 57,
+	.alpha = 0xaaaaaaab,
+	.alpha_hi = 0x4a,
+	.alpha_en_mask = BIT(24),
 	.config_ctl_val = 0x4001055b,
 	.main_output_mask = BIT(0),
 	.test_ctl_val = 0x0,
 	.test_ctl_mask = GENMASK(31, 0),
 	.test_ctl_hi_val = 0x40000600,
 	.test_ctl_hi_mask = GENMASK(31, 0),
-	.alpha_en_mask = BIT(24),
-	.post_div_val = BIT(8),
+	.post_div_val = 0,
 	.post_div_mask = GENMASK(11, 8),
 };
 
@@ -103,7 +112,11 @@ static struct clk_alpha_pll gpll3_early = {
 				.fw_name = "xo",
 			},
 			.num_parents = 1,
-			.ops = &clk_alpha_pll_ops,
+			/*
+			 * Configured once at probe to 1100 MHz; the GPU divides
+			 * it, it is never re-locked at runtime.
+			 */
+			.ops = &clk_alpha_pll_fixed_ops,
 		},
 	},
 };
@@ -117,8 +130,7 @@ static struct clk_alpha_pll_postdiv gpll3 = {
 			&gpll3_early.clkr.hw,
 		},
 		.num_parents = 1,
-		.ops = &clk_alpha_pll_postdiv_ops,
-		.flags = CLK_SET_RATE_PARENT,
+		.ops = &clk_alpha_pll_postdiv_ro_ops,
 	},
 };
 
@@ -425,9 +437,13 @@ static const struct freq_tbl ftbl_gcc_oxili_gfx3d_clk[] = {
 	F(240000000, P_GPLL6_AUX, 4.5, 0, 0),
 	F(266670000, P_GPLL0, 3, 0, 0),
 	F(400000000, P_GPLL0, 2, 0, 0),
-	F(465000000, P_GPLL3, 1, 0, 0),
-	F(500000000, P_GPLL3, 1, 0, 0),
-	F(550000000, P_GPLL3, 1, 0, 0),
+	/*
+	 * Downstream: 550 MHz from GPLL3 (1100 MHz) / 2. GPLL3 runs at a
+	 * fixed rate; the 465 MHz level comes from GPLL2 downstream, which
+	 * this driver does not provide, so it is left out instead of
+	 * re-locking GPLL3 to a rate outside its table.
+	 */
+	F(550000000, P_GPLL3, 2, 0, 0),
 	{ }
 };
 
@@ -441,7 +457,7 @@ static struct clk_rcg2 gfx3d_clk_src = {
 		.parent_data = gcc_xo_gpll0_gpll3_gpll6a_parent_data,
 		.num_parents = ARRAY_SIZE(gcc_xo_gpll0_gpll3_gpll6a_parent_data),
 		.ops = &clk_rcg2_ops,
-		.flags = CLK_SET_RATE_PARENT | CLK_OPS_PARENT_ENABLE,
+		.flags = CLK_OPS_PARENT_ENABLE,
 	},
 };
 
