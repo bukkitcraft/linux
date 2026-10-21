@@ -1901,6 +1901,29 @@
 			};
 		};
 
+		venus: video-codec@1d00000 {
+			compatible = "qcom,msm8952-venus";
+			reg = <0x01d00000 0xff000>;
+			clocks = <&gcc GCC_VENUS0_VCODEC0_CLK>,
+				 <&gcc GCC_VENUS0_AHB_CLK>,
+				 <&gcc GCC_VENUS0_AXI_CLK>,
+				 <&gcc GCC_VENUS0_CORE0_VCODEC0_CLK>;
+			clock-names = "core", "iface", "bus", "vcodec0_core";
+			interrupts = <GIC_SPI 44 IRQ_TYPE_LEVEL_HIGH>;
+			iommus = <&apps_iommu 0x16>;
+			memory-region = <&venus_mem>;
+			power-domains = <&gcc VENUS_GDSC>, <&gcc VENUS_CORE0_GDSC>;
+			power-domain-names = "venus", "vcodec0";
+
+			video-decoder {
+				compatible = "venus-decoder";
+			};
+
+			video-encoder {
+				compatible = "venus-encoder";
+			};
+		};
+
 		apps_iommu: iommu@1e20000 {
 			compatible = "qcom,msm8952-iommu", "qcom,msm-iommu-v1";
 			ranges = <0 0x01e20000 0x20000>;

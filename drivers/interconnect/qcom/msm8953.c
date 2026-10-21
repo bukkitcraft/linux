@@ -1313,6 +1313,7 @@ static struct platform_driver msm8953_noc_driver = {
 	.remove = qnoc_remove,
 	.driver = {
 		.name = "qnoc-msm8953",
+		.sync_state = icc_sync_state,
 		.of_match_table = msm8953_noc_of_match,
 	},
 };

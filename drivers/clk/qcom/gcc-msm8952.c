@@ -1342,6 +1342,7 @@ static const struct freq_tbl ftbl_gcc_venus0_vcodec0_clk[] = {
 	F(228570000, P_GPLL0, 3.5, 0, 0),
 	F(266670000, P_GPLL0, 3, 0, 0),
 	F(308570000, P_GPLL6, 3.5, 0, 0),
+	F(400000000, P_GPLL0, 2, 0, 0),
 	{ }
 };
 

@@ -792,6 +792,45 @@ static const struct venus_resources msm8937_res = {
 	.enc_nodename = "video-encoder",
 };
 
+static const struct freq_tbl msm8952_freq_table[] = {
+	{ 0, 400000000 },	/* 1080p@60 test */
+	{ 0, 308570000 },
+	{ 0, 266670000 },
+	{ 0, 228570000 },
+	{ 0, 180000000 },
+	{ 0, 133330000 },
+};
+
+static const struct venus_resources msm8952_res = {
+	.freq_tbl = msm8952_freq_table,
+	.freq_tbl_size = ARRAY_SIZE(msm8952_freq_table),
+	.reg_tbl = msm8916_reg_preset,
+	.reg_tbl_size = ARRAY_SIZE(msm8916_reg_preset),
+	.bw_tbl_enc = msm8917_bw_table_enc,
+	.bw_tbl_enc_size = ARRAY_SIZE(msm8917_bw_table_enc),
+	.bw_tbl_dec = msm8917_bw_table_dec,
+	.bw_tbl_dec_size = ARRAY_SIZE(msm8917_bw_table_dec),
+	.clks = {"core", "iface", "bus" },
+	.clks_num = 3,
+	.vcodec_clks = { "vcodec0_core" },
+	.vcodec_clks_num = 1,
+	.vcodec_pmdomains = (const char *[]) { "venus", "vcodec0" },
+	.vcodec_pmdomains_num = 2,
+	.max_load = 489600,  /* 1080p@60 */
+	.hfi_version = HFI_VERSION_3XX,
+	.vmem_id = VIDC_RESOURCE_NONE,
+	.vmem_size = 0,
+	.vmem_addr = 0,
+	.cp_start = 0,
+	.cp_size = 0x5dc00000,
+	.cp_nonpixel_start = 0x1000000,
+	.cp_nonpixel_size = 0x24800000,
+	.dma_mask = 0xddc00000 - 1,
+	.fwname = "venus.mdt",
+	.dec_nodename = "video-decoder",
+	.enc_nodename = "video-encoder",
+};
+
 static const struct freq_tbl msm8996_freq_table[] = {
 	{ 1944000, 520000000 },	/* 4k UHD @ 60 (decode only) */
 	{  972000, 520000000 },	/* 4k UHD @ 30 */
@@ -1227,6 +1266,7 @@ static const struct of_device_id venus_dt_match[] = {
 	{ .compatible = "qcom,msm8916-venus", .data = &msm8916_res, },
 	{ .compatible = "qcom,msm8917-venus", .data = &msm8917_res, },
 	{ .compatible = "qcom,msm8937-venus", .data = &msm8937_res, },
+	{ .compatible = "qcom,msm8952-venus", .data = &msm8952_res, },
 	{ .compatible = "qcom,msm8996-venus", .data = &msm8996_res, },
 	{ .compatible = "qcom,msm8998-venus", .data = &msm8998_res, },
 	{ .compatible = "qcom,qcm2290-venus", .data = &qcm2290_res, },
