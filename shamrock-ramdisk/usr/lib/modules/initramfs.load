@@ -1,0 +1,8 @@
+msm
+qcom_common
+qcom_pil_info
+hw_random
+extcon-usbc-tusb320
+typec
+goodix_ts
+himax_hx852x

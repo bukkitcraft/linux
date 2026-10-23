@@ -1,0 +1,7 @@
+# Soft dependencies extracted from modules themselves.
+softdep cifs nls
+softdep cifs aes
+softdep cifs aead2
+softdep cifs ccm
+softdep cifs gcm
+softdep xt_LOG pre: nf_log_syslog

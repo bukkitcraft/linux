@@ -1,0 +1,23 @@
+kernel/drivers/soc/qcom/mdt_loader.ko.zst:
+kernel/drivers/soc/qcom/ubwc_config.ko.zst:
+kernel/drivers/gpu/drm/display/drm_display_helper.ko.zst: kernel/drivers/media/cec/core/cec.ko.zst
+kernel/drivers/gpu/drm/drm_exec.ko.zst:
+kernel/drivers/gpu/drm/drm_gpuvm.ko.zst: kernel/drivers/gpu/drm/drm_exec.ko.zst
+kernel/drivers/gpu/drm/scheduler/gpu-sched.ko.zst:
+kernel/drivers/gpu/drm/msm/msm.ko.zst: kernel/drivers/gpu/drm/display/drm_display_helper.ko.zst kernel/drivers/media/cec/core/cec.ko.zst kernel/drivers/soc/qcom/ubwc_config.ko.zst kernel/drivers/soc/qcom/mdt_loader.ko.zst kernel/drivers/gpu/drm/scheduler/gpu-sched.ko.zst kernel/drivers/gpu/drm/drm_gpuvm.ko.zst kernel/drivers/gpu/drm/drm_exec.ko.zst
+kernel/drivers/usb/storage/usb-storage.ko.zst:
+kernel/drivers/usb/gadget/function/usb_f_acm.ko.zst: kernel/drivers/usb/gadget/function/u_serial.ko.zst kernel/drivers/usb/gadget/libcomposite.ko.zst
+kernel/drivers/usb/gadget/function/u_serial.ko.zst: kernel/drivers/usb/gadget/libcomposite.ko.zst
+kernel/drivers/usb/gadget/function/u_ether.ko.zst: kernel/drivers/usb/gadget/libcomposite.ko.zst
+kernel/drivers/usb/gadget/function/usb_f_ncm.ko.zst: kernel/drivers/usb/gadget/function/u_ether.ko.zst kernel/drivers/usb/gadget/libcomposite.ko.zst
+kernel/drivers/usb/gadget/function/usb_f_rndis.ko.zst: kernel/drivers/usb/gadget/function/u_ether.ko.zst kernel/drivers/usb/gadget/libcomposite.ko.zst
+kernel/drivers/usb/gadget/function/usb_f_mass_storage.ko.zst: kernel/drivers/usb/gadget/libcomposite.ko.zst
+kernel/drivers/usb/gadget/libcomposite.ko.zst:
+kernel/drivers/usb/typec/typec.ko.zst:
+kernel/drivers/input/touchscreen/goodix_ts.ko.zst:
+kernel/drivers/input/touchscreen/himax_hx852x.ko.zst:
+kernel/drivers/input/evdev.ko.zst:
+kernel/drivers/media/cec/core/cec.ko.zst:
+kernel/drivers/remoteproc/qcom_pil_info.ko.zst:
+kernel/drivers/remoteproc/qcom_common.ko.zst:
+kernel/drivers/extcon/extcon-usbc-tusb320.ko.zst: kernel/drivers/usb/typec/typec.ko.zst
