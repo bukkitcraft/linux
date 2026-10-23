@@ -792,13 +792,13 @@ static const struct venus_resources msm8937_res = {
 	.enc_nodename = "video-encoder",
 };
 
+/* downstream msm8952.dtsi qcom,load-freq-tbl (decoder and encoder rows) */
 static const struct freq_tbl msm8952_freq_table[] = {
-	{ 0, 400000000 },	/* 1080p@60 test */
-	{ 0, 308570000 },
-	{ 0, 266670000 },
-	{ 0, 228570000 },
-	{ 0, 180000000 },
-	{ 0, 133330000 },
+	{ 489600, 266670000 },	/* 1080p @ 60 decode, encoder turbo */
+	{ 367200, 180000000 },	/* 1080p @ 45 */
+	{ 244800, 180000000 },	/* 1080p @ 30 */
+	{ 220800, 133330000 },	/* 720p @ 60 */
+	{ 108000, 133330000 },	/* 720p @ 30 */
 };
 
 static const struct venus_resources msm8952_res = {
@@ -816,7 +816,7 @@ static const struct venus_resources msm8952_res = {
 	.vcodec_clks_num = 1,
 	.vcodec_pmdomains = (const char *[]) { "venus", "vcodec0" },
 	.vcodec_pmdomains_num = 2,
-	.max_load = 489600,  /* 1080p@60 */
+	.max_load = 489600,  /* downstream qcom,max-hw-load */
 	.hfi_version = HFI_VERSION_3XX,
 	.vmem_id = VIDC_RESOURCE_NONE,
 	.vmem_size = 0,

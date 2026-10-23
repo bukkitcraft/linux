@@ -1342,7 +1342,6 @@ static const struct freq_tbl ftbl_gcc_venus0_vcodec0_clk[] = {
 	F(228570000, P_GPLL0, 3.5, 0, 0),
 	F(266670000, P_GPLL0, 3, 0, 0),
 	F(308570000, P_GPLL6, 3.5, 0, 0),
-	F(400000000, P_GPLL0, 2, 0, 0),
 	{ }
 };
 
@@ -3170,6 +3169,8 @@ static struct clk_branch gcc_venus0_vcodec0_clk = {
 
 static struct clk_branch gcc_venus0_core0_vcodec0_clk = {
 	.halt_reg = 0x4c02c,
+	/* gated by the HW_CTRL venus_core0 GDSC, status is not reliable */
+	.halt_check = BRANCH_HALT_SKIP,
 	.clkr = {
 		.enable_reg = 0x4c02c,
 		.enable_mask = BIT(0),
@@ -3187,6 +3188,8 @@ static struct clk_branch gcc_venus0_core0_vcodec0_clk = {
 
 static struct clk_branch gcc_venus0_core1_vcodec0_clk = {
 	.halt_reg = 0x4c034,
+	/* gated by the HW_CTRL venus_core1 GDSC, status is not reliable */
+	.halt_check = BRANCH_HALT_SKIP,
 	.clkr = {
 		.enable_reg = 0x4c034,
 		.enable_mask = BIT(0),

@@ -1914,6 +1914,10 @@
 			memory-region = <&venus_mem>;
 			power-domains = <&gcc VENUS_GDSC>, <&gcc VENUS_CORE0_GDSC>;
 			power-domain-names = "venus", "vcodec0";
+			/* Stock: mas-venus (snoc-mm, qport 8, bypass) -> slv-ebi (bimc) */
+			interconnects = <&snoc_mm MAS_VENUS RPM_ALWAYS_TAG
+					 &bimc SLV_EBI RPM_ALWAYS_TAG>;
+			interconnect-names = "video-mem";
 
 			video-decoder {
 				compatible = "venus-decoder";
