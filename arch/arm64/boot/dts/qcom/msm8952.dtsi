@@ -469,11 +469,6 @@
 
 		opp-1516800000 {
 			opp-hz = /bits/ 64 <1516800000>;
-			opp-peak-kBps = <6152000>;
-		};
-
-		opp-1651200000 {
-			opp-hz = /bits/ 64 <1651200000>;
 			opp-peak-kBps = <7031000>;
 		};
 	};
@@ -2717,6 +2712,7 @@
 		apcs0: mailbox@b111000 {
 			compatible = "qcom,msm8939-apcs-kpss-global", "syscon";
 			reg = <0x0b111000 0x1000>;
+			qcom,init-gpll0-mux;
 			#mbox-cells = <1>;
 			clocks = <&a53pll_c0>, <&gcc GPLL0_VOTE>, <&rpmcc RPM_SMD_XO_CLK_SRC>;
 			clock-names = "pll", "aux", "ref";
@@ -2744,6 +2740,7 @@
 		a53pll_c0: clock@b116000 {
 			compatible = "qcom,msm8939-a53pll";
 			reg = <0x0b116000 0x40>;
+			qcom,init-sr2-pll;
 			clocks = <&xo_board>;
 			clock-names = "xo";
 			#clock-cells = <0>;

@@ -10,6 +10,7 @@
 #include <linux/clk-provider.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/of.h>
 #include <linux/slab.h>
 #include <linux/platform_device.h>
 #include <linux/regmap.h>
@@ -50,6 +51,7 @@ static int qcom_apcs_msm8916_clk_probe(struct platform_device *pdev)
 	struct clk_regmap_mux_div *a53cc;
 	struct regmap *regmap;
 	struct clk_init_data init = { };
+	u32 cmd;
 	int ret = -ENODEV;
 
 	regmap = dev_get_regmap(parent, NULL);
@@ -95,6 +97,23 @@ static int qcom_apcs_msm8916_clk_probe(struct platform_device *pdev)
 	if (ret) {
 		dev_err(dev, "failed to register clock notifier: %d\n", ret);
 		return ret;
+	}
+
+	/*
+	 * Downstream (cpu_clock_a53_init_little) moves the MSM8952 little
+	 * cluster mux to GPLL0/2 and enables its core branch at early init,
+	 * after the C0 PLL has been brought up. The bootloader leaves the mux
+	 * on a source this driver does not know, so the rate reads as 0 and
+	 * cpufreq cannot manage the cluster. Do the same here.
+	 */
+	if (of_property_read_bool(np, "qcom,init-gpll0-mux")) {
+		regmap_write(regmap, a53cc->reg_offset + 0x4,
+			     (gpll0_a53cc_map[0] << a53cc->src_shift) | 3);
+		regmap_update_bits(regmap, a53cc->reg_offset, BIT(0), BIT(0));
+		regmap_read_poll_timeout_atomic(regmap, a53cc->reg_offset, cmd,
+						!(cmd & BIT(0)), 1, 500);
+		regmap_update_bits(regmap, a53cc->reg_offset + 0x8, BIT(0), BIT(0));
+		dev_info(dev, "little cluster mux moved to GPLL0/2\n");
 	}
 
 	ret = devm_clk_register_regmap(dev, &a53cc->clkr);

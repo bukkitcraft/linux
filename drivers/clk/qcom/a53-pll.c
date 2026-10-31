@@ -8,7 +8,9 @@
 
 #include <linux/clk.h>
 #include <linux/clk-provider.h>
+#include <linux/delay.h>
 #include <linux/kernel.h>
+#include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/pm_opp.h>
 #include <linux/regmap.h>
@@ -118,6 +120,32 @@ static int qcom_a53pll_probe(struct platform_device *pdev)
 	if (!pll->freq_tbl) {
 		/* Fall on a53pll_freq if no freq_tbl is found from OPP */
 		pll->freq_tbl = a53pll_freq;
+	}
+
+	/*
+	 * The MSM8952 bootloader leaves the little cluster PLL (C0) switched
+	 * off and unconfigured. The downstream kernel programs it at early
+	 * init (L=0x34 -> 998.4 MHz, USER_CTL/CONFIG_CTL below) before any
+	 * cpufreq switch to it; do the same so the PLL can actually lock.
+	 */
+	if (of_property_read_bool(np, "qcom,init-sr2-pll")) {
+		u32 mode;
+
+		regmap_read(regmap, pll->mode_reg, &mode);
+		if (!(mode & BIT(0))) {
+			regmap_write(regmap, pll->mode_reg, 0x0);
+			regmap_write(regmap, pll->l_reg, 0x34);
+			regmap_write(regmap, pll->m_reg, 0x0);
+			regmap_write(regmap, pll->n_reg, 0x1);
+			regmap_write(regmap, 0x10, 0x0100000f);
+			regmap_write(regmap, pll->config_reg, 0x4c015765);
+			regmap_write(regmap, pll->mode_reg, 0x2);
+			udelay(2);
+			regmap_write(regmap, pll->mode_reg, 0x6);
+			udelay(50);
+			regmap_write(regmap, pll->mode_reg, 0x7);
+			dev_info(dev, "configured and enabled SR2 PLL\n");
+		}
 	}
 
 	/* Use an unique name by appending @unit-address */
