@@ -648,6 +648,13 @@ static uint32_t get_scale_config(const struct msm_format *format,
 	}
 	ya_filter = (src <= dst) ? SCALE_FILTER_BIL : SCALE_FILTER_PCMN;
 
+	/*
+	 * Exact integer RGB upscale (e.g. 540 -> 1080): replicate pixels instead
+	 * of blending neighbours, so a low resolution mode stays pixel-sharp.
+	 */
+	if (!yuv && src < dst && dst % src == 0)
+		ya_filter = SCALE_FILTER_NEAREST;
+
 	if (horz)
 		return  MDP5_PIPE_SCALE_CONFIG_SCALEX_EN |
 			MDP5_PIPE_SCALE_CONFIG_SCALEX_FILTER_COMP_0(ya_filter) |
@@ -666,19 +673,22 @@ static void calc_pixel_ext(const struct msm_format *format,
 		bool horz)
 {
 	bool scaling = MSM_FORMAT_IS_YUV(format) ? true : (src != dst);
+	/* nearest (exact integer RGB upscale) needs no extra edge pixel */
+	bool nearest = !MSM_FORMAT_IS_YUV(format) && src < dst && dst % src == 0;
 	int i;
 
 	/*
 	 * Note:
 	 * We assume here that:
 	 *     1. PCMN filter is used for downscale
-	 *     2. bilinear filter is used for upscale
+	 *     2. bilinear filter is used for upscale (nearest for exact
+	 *        integer RGB upscale, see get_scale_config())
 	 *     3. we are in a single pipe configuration
 	 */
 
 	for (i = 0; i < COMP_MAX; i++) {
 		pix_ext_edge1[i] = 0;
-		pix_ext_edge2[i] = scaling ? 1 : 0;
+		pix_ext_edge2[i] = (scaling && !nearest) ? 1 : 0;
 	}
 }
 
